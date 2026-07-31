@@ -22,11 +22,32 @@ from sxl.config import (
     CORPUS_STATS_PATH,
     CORPUS_TARGET_N,
     DOCS_PATH,
+    MAX_TEACHER_SPEND_USD,
     METRICS_DIR,
     PREDICTIONS_DIR,
+    TEACHER_MODEL,
+    TEACHER_PRICE_USD,
+    ensure_dirs,
 )
 
 ArmOpt = Annotated[str, typer.Option("--arm", help="one of config.ARMS")]
+
+#: Echoed as one JSON line at the end of a real `teacher label` run.
+_TEACHER_SUMMARY_KEYS = (
+    "n_requested",
+    "n_cached",
+    "n_new_requests",
+    "n_ok",
+    "n_parse_failed",
+    "n_schema_invalid",
+    "n_api_error",
+    "spend_usd",
+    "spend_usd_cached",
+)
+
+#: F2 acceptance criteria. Only checked on a full (`--limit 0`) run of that split.
+#: `eval_pool` is the tightest: F3 samples 330 candidates from it.
+_TEACHER_MIN_ROWS = {"train": 4500, "dev": 280, "eval_pool": 330}
 
 app = typer.Typer(
     name="sxl",
@@ -110,10 +131,97 @@ def corpus_build(
 # --- F2 ----------------------------------------------------------------------
 @teacher_app.command("label")
 def teacher_label(
-    split: Annotated[str, typer.Option("--split", help="train | dev | eval_pool")] = "train",
+    split: Annotated[str, typer.Option("--split", help="train | dev | eval_pool | all")] = "train",
+    limit: Annotated[int, typer.Option("--limit", help="cap documents this run; 0 = no cap")] = 0,
+    resume: Annotated[
+        bool,
+        typer.Option("--resume/--no-resume", help="harvest in-flight batches before submitting"),
+    ] = True,
+    model: Annotated[str, typer.Option("--model", help="teacher model id")] = TEACHER_MODEL,
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run/--no-dry-run", help="count and project cost; zero API calls"),
+    ] = False,
 ) -> None:
     """Label a split with the teacher model via the OpenAI Batch API."""
-    _not_yet("teacher label", "F2")
+    from sxl.teacher import (
+        SPLIT_CHOICES,
+        TeacherError,
+        TeacherPaths,
+        label,
+        make_client,
+        report_stats,
+    )
+
+    ensure_dirs()
+
+    # Exit 1, not typer's usual 2: in this repo exit 2 means "not implemented" and
+    # must stay unambiguous (see `_not_yet`).
+    if split not in SPLIT_CHOICES:
+        typer.secho(
+            f"unknown --split {split!r}; expected one of {' | '.join(SPLIT_CHOICES)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if model not in TEACHER_PRICE_USD:
+        typer.secho(
+            f"no price for {model!r}; add it to config.TEACHER_PRICE_USD before spending money",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        # No client at all on a dry run, so it works with no .env present.
+        client = None if dry_run else make_client()
+        stats = label(
+            split, limit=limit, resume=resume, model=model, dry_run=dry_run, client=client
+        )
+    except TeacherError as exc:  # spend cap, missing key, timeout, cancellation
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    if dry_run:
+        counts = stats["split_counts"]
+        tokens = stats["projected_tokens"]
+        typer.echo(f"[teacher] model={model} prompt_sha={stats['prompt_sha']} split={split}")
+        typer.echo(
+            f"[teacher] selected {stats['n_requested']}  cached {stats['n_cached']}  "
+            f"to request {stats['n_new_requests']}   "
+            + " / ".join(f"{k} {v}" for k, v in counts.items())
+        )
+        typer.echo(
+            f"[teacher] estimated {tokens['input'] / 1e6:.2f}M input + "
+            f"{tokens['output'] / 1e6:.2f}M output tokens in {stats['n_batches']} batches"
+        )
+        typer.echo(
+            f"[teacher] projected ${stats['projected_usd']:.2f}  "
+            f"(cap ${MAX_TEACHER_SPEND_USD:.2f}) — no API calls made"
+        )
+        raise typer.Exit(code=0)
+
+    report_stats(stats)  # writes teacher_stats.json and prints the quality summary
+    paths = TeacherPaths.default()  # report the paths actually written, not the constants
+    for name, n in stats["split_counts"].items():
+        typer.echo(f"wrote {paths.for_split(name)} ({n} rows)")
+    typer.echo(f"wrote {paths.stats}")
+    typer.echo(
+        json.dumps(
+            {k: stats[k] for k in _TEACHER_SUMMARY_KEYS},
+            sort_keys=True,
+        )
+    )
+
+    problems = list(stats["quality_warnings"])
+    if limit == 0:  # a --limit run is expected to be short; do not flag it
+        for name, floor in _TEACHER_MIN_ROWS.items():
+            if name in stats["split_counts"] and stats["split_counts"][name] < floor:
+                problems.append(f"{name} has {stats['split_counts'][name]} rows, need >= {floor}")
+    if problems:
+        for problem in problems:
+            typer.secho(problem, fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
 
 
 # --- F3 ----------------------------------------------------------------------

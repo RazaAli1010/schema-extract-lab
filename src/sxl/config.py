@@ -65,6 +65,48 @@ TEACHER_MODEL = "gpt-4o-mini"
 MAX_TEACHER_SPEND_USD = 25.0  # hard stop, not a guideline
 TEACHER_MAX_RETRIES = 3
 
+# Internal artifacts (F2). Both live under DATA, so `data/**` in .gitignore covers
+# them with no new rule; teacher_stats.json is under RESULTS and IS committed --
+# it is the label-quality artifact F3 reads before spending human hours.
+TEACHER_CACHE_PATH = DATA / "labeled" / "_teacher_cache.jsonl"  # append-only, one row per response
+TEACHER_BATCHES_PATH = DATA / "labeled" / "_batches.json"  # in-flight ledger; makes --resume work
+TEACHER_STATS_PATH = RESULTS / "teacher_stats.json"
+
+TEACHER_BATCH_SIZE = 500  # requests per batch: ~5700 docs -> 12 batches, ~3 MB per input file
+# OpenAI caps *enqueued* tokens per model across in-flight batches. All 12 at once
+# is ~12M enqueued input tokens, which comes back as status "failed" on a low usage
+# tier. Four in flight is ~4M and still ~3x faster than submitting sequentially.
+TEACHER_MAX_INFLIGHT_BATCHES = 4
+TEACHER_POLL_SECONDS = 60  # the Batch SLA is 24h; polling faster buys nothing
+TEACHER_MAX_WAIT_S = 86_400  # past the 24h SLA, give up and tell the user to --resume
+
+TEACHER_MAX_TOKENS = 1024  # the 16-field object is ~350 tokens; 1024 without inviting rambling
+TEACHER_DOC_RETRY_ROUNDS = 1  # an unparseable document is retried at most once
+TEACHER_RETRY_BACKOFF_S = (4, 16, 64)  # whole-batch backoff; len() == TEACHER_MAX_RETRIES
+
+# USD per 1M tokens, **STANDARD** rates. Do not pre-discount: `teacher.cost_of`
+# multiplies by TEACHER_BATCH_DISCOUNT, so halving the table double-applies it.
+TEACHER_PRICE_USD = {"gpt-4o-mini": {"in": 0.15, "out": 0.60}, "gpt-4o": {"in": 2.50, "out": 10.00}}
+TEACHER_BATCH_DISCOUNT = 0.5  # the Batch API is 50% off
+
+# Pre-flight spend projection only. There is no tokenizer on the laptop and
+# tiktoken is not in the base group -- 4.0 chars/token is the standard English
+# heuristic and over-predicts slightly on bulleted job-posting text, which is the
+# right direction for a spend cap.
+TEACHER_CHARS_PER_TOKEN = 4.0
+TEACHER_REQUEST_OVERHEAD_TOKENS = 32  # chat framing + response_format name, per request
+TEACHER_EST_OUTPUT_TOKENS = 350  # the 16-field object
+TEACHER_MIN_DOCS_FOR_MEAN_COST = 50  # below this, trust the char estimate over an observed mean
+
+# Label-quality smoke test (F2 acceptance criteria).
+TEACHER_MAX_ENUM_SHARE = 0.95  # no enum field may be >95% a single value
+# ...but only once the sample can support that conclusion. Without this gate a
+# healthy `--split dev --limit 20` smoke run trips the guard, because 20 postings
+# really are all `education_level: "unknown"`.
+TEACHER_QUALITY_MIN_N = 200
+# >half the corpus with `required_skills: []` is a broken prompt, not a quiet corpus.
+TEACHER_MAX_SKILLS_EMPTY_SHARE = 0.5
+
 # --- student / benchmark (SPEC §6.5) -----------------------------------------
 BASE_MODEL = "Qwen/Qwen3-1.7B"
 T4_HOURLY_USD = 0.35  # ~GCP on-demand T4; source recorded in results/bench/*
