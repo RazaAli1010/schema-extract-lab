@@ -11,9 +11,9 @@ from sxl.cli import app
 
 runner = CliRunner()
 
-# command -> the feature that owns it (SPEC §8)
+# command -> the feature that owns it (SPEC §8). A feature deletes its entry when it
+# lands and replaces it with a `--help`-only test below.
 UNIMPLEMENTED = {
-    ("teacher", "label"): "F2",
     ("gold", "sample"): "F3",
     ("gold", "verify"): "F3",
     ("metrics", "score"): "F4",
@@ -52,6 +52,14 @@ def test_corpus_build_is_implemented_and_exposes_its_options():
     result = runner.invoke(app, ["corpus", "build", "--help"])
     assert result.exit_code == 0
     for option in ("--target-n", "--source", "--force"):
+        assert option in result.output
+
+
+def test_teacher_label_is_implemented_and_exposes_its_options():
+    """F2 owns `teacher label`; it must no longer exit 2. Never invoked here — it spends money."""
+    result = runner.invoke(app, ["teacher", "label", "--help"])
+    assert result.exit_code == 0
+    for option in ("--split", "--limit", "--resume", "--model", "--dry-run"):
         assert option in result.output
 
 

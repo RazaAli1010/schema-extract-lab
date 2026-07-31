@@ -35,6 +35,32 @@ def test_importing_sxl_corpus_does_not_import_datasets():
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
 
 
+def test_importing_sxl_teacher_does_not_import_openai():
+    """F2's `openai` import must stay inside function bodies, like F1's `datasets`.
+
+    The whole test suite runs against a stub client, so nothing in `sxl` may make the
+    SDK a load-time requirement — and a `sxl --help` on a machine without it must work.
+    """
+    code = textwrap.dedent("""
+        import sys
+        import sxl.teacher, sxl.prompts, sxl.cli
+        assert "openai" not in sys.modules, sorted(m for m in sys.modules if "openai" in m)
+    """)
+    assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
+def test_the_anthropic_sdk_is_not_installed():
+    """One LLM client only (SPEC §6.5).
+
+    `specs/F2-teacher-labeling.md` originally specified Anthropic; SPEC.md is the
+    source of truth and says `gpt-4o-mini` via OpenAI. The orphaned SDK was removed
+    when F2 landed, and this keeps it removed.
+    """
+    import importlib.util
+
+    assert importlib.util.find_spec("anthropic") is None, "the teacher is OpenAI, not Anthropic"
+
+
 def test_importing_the_gpu_package_does_not_import_torch():
     code = textwrap.dedent("""
         import sys
