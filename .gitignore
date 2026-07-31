@@ -1,0 +1,37 @@
+# --- data & scratch artifacts (SPEC §4): never committed ---
+# NOTE: these ignore the *contents*, not the directories themselves. Ignoring
+# `data/` outright would stop git descending into it, and the `!.gitkeep`
+# negations below would never be evaluated.
+data/**
+artifacts/**
+!data/**/
+!artifacts/**/
+!data/**/.gitkeep
+!artifacts/**/.gitkeep
+
+# results/ IS committed (small JSON + md tables) — no rule here.
+
+# --- model weights: never, under any circumstances (SPEC §2.4) ---
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.gguf
+
+# --- secrets ---
+.env
+
+# --- python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# --- notebook outputs are the artifact; keep them, but not the checkpoints ---
