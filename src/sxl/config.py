@@ -38,7 +38,7 @@ N_TRAIN_TARGET, N_DEV_TARGET, N_EVAL_GOLD = 5000, 300, 300
 MAX_INPUT_CHARS, MAX_NEW_TOKENS, TEMPERATURE, N_FEWSHOT = 6000, 512, 0.0, 3
 
 # --- teacher (SPEC §6.5) -----------------------------------------------------
-TEACHER_MODEL = "claude-sonnet-5"
+TEACHER_MODEL = "gpt-4o-mini"
 MAX_TEACHER_SPEND_USD = 25.0  # hard stop, not a guideline
 TEACHER_MAX_RETRIES = 3
 

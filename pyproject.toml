@@ -13,7 +13,7 @@ license-files = ["LICENSE"]
 dependencies = [
   "pydantic==2.13.4",
   "jsonschema==4.26.0",
-  "anthropic==0.120.2",
+  "openai==2.51.0",
   "typer==0.27.0",
   "python-dotenv>=1.0",
   "datasets==5.0.1",      # base, not gpu: F1 streams the corpus on the laptop.

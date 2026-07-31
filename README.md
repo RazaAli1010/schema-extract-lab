@@ -1,7 +1,7 @@
 # schema-extract-lab
 
 Fine-tune a ~1.7B open model to extract a strict JSON schema from unstructured job
-postings, and measure how close it lands to a frontier teacher model.
+postings, and measure how close it lands to a hosted teacher model (`gpt-4o-mini`).
 
 See [SPEC.md](SPEC.md) for the full contract and [specs/](specs/) for per-feature specs.
 

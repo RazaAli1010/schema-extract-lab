@@ -64,7 +64,7 @@ def corpus_build() -> None:
 def teacher_label(
     split: Annotated[str, typer.Option("--split", help="train | dev | eval_pool")] = "train",
 ) -> None:
-    """Label a split with the teacher model via the Anthropic Batch API."""
+    """Label a split with the teacher model via the OpenAI Batch API."""
     _not_yet("teacher label", "F2")
 
 
