@@ -13,7 +13,6 @@ runner = CliRunner()
 
 # command -> the feature that owns it (SPEC §8)
 UNIMPLEMENTED = {
-    ("corpus", "build"): "F1",
     ("teacher", "label"): "F2",
     ("gold", "sample"): "F3",
     ("gold", "verify"): "F3",
@@ -46,6 +45,14 @@ def test_unimplemented_commands_exit_2_naming_their_feature(group, command, feat
     result = runner.invoke(app, [group, command])
     assert result.exit_code == 2
     assert feature in result.output
+
+
+def test_corpus_build_is_implemented_and_exposes_its_options():
+    """F1 owns `corpus build`; it must no longer exit 2. Never invoked here — network."""
+    result = runner.invoke(app, ["corpus", "build", "--help"])
+    assert result.exit_code == 0
+    for option in ("--target-n", "--source", "--force"):
+        assert option in result.output
 
 
 def test_schema_dump_to_stdout():

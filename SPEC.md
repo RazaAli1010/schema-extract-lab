@@ -207,12 +207,17 @@ All files are **JSONL, UTF-8, one object per line, keys in the order below**.
 
 `data/raw/docs.jsonl` — output of F1
 ```json
-{"doc_id": "jp_000001", "domain": "job_posting", "text": "...", "source": "lukebarousse/data_jobs", "char_len": 3412}
+{"doc_id": "jp_a1b2c3d4e5", "domain": "job_posting", "text": "...", "source": "xanderios/linkedin-job-postings", "char_len": 3412}
 ```
+
+`doc_id` is `"jp_" + sha256(f"{source}\x00{source_key}")[:10]` — a function of
+content, never of position. Sequential ids are **forbidden**: split membership
+derives from `doc_id` (§3.4), so a sequence number would silently move documents
+between `train` and `eval_gold` the moment upstream reordered its rows.
 
 `data/labeled/{train,dev,eval_pool}.jsonl` and `data/gold/eval_gold.jsonl` — F2, F3
 ```json
-{"doc_id": "jp_000001", "domain": "job_posting", "text": "...",
+{"doc_id": "jp_a1b2c3d4e5", "domain": "job_posting", "text": "...",
  "gold": { <the 16 JobPosting fields> },
  "label_source": "teacher",
  "teacher_model": "gpt-4o-mini",
@@ -229,6 +234,16 @@ In `eval_gold.jsonl`, `label_source` is `"human"` and `verified_by_human` is
  "latency_ms": 2841.3, "prompt_tokens": 1180, "completion_tokens": 143}
 ```
 `parsed` is `null` when the output does not parse or does not validate.
+
+`results/corpus_stats.json` — F1 (committed)
+```json
+{"source": "xanderios/linkedin-job-postings", "license": "mit",
+ "n_seen": 0, "n_dropped_short": 0, "n_dropped_long": 0,
+ "n_dropped_dup_id": 0, "n_dropped_dup_prefix": 0, "n_kept": 0,
+ "char_len": {"p5": 0, "p50": 0, "p95": 0, "max": 0},
+ "split_counts": {"train": 0, "dev": 0, "eval_pool": 0},
+ "generated_at": "...", "git_sha": "abc1234"}
+```
 
 `results/metrics/<arm>.json` — F4
 ```json
@@ -255,6 +270,14 @@ Target sizes: **train ≈ 5000**, **dev = 300**, **eval_gold = 300** (F3 samples
 The binding constraint on corpus size is the 5% `eval_pool` bucket: it must yield
 **≥ 340** documents, so the corpus needs **≥ 7,000**. F1 targets 7,500.
 `train` and `dev` are capped at their targets; **`eval_pool` is never capped.**
+
+The corpus source is **`xanderios/linkedin-job-postings`** (MIT, ungated, 33,246
+real postings, descriptions of ~3–5.5k chars), fetched by F1. It replaced
+`lukebarousse/data_jobs`, which turned out to be metadata-only — 17 short columns
+and no description field at all, longest string ~85 chars — so it could not
+support extraction from unstructured text. F1 asserts at runtime that the chosen
+text column has a median length above `CORPUS_MIN_CHARS`, so that failure mode
+crashes loudly rather than yielding an empty corpus.
 
 Split assignment is **deterministic and content-independent of ordering**:
 
@@ -399,6 +422,7 @@ schema-extract-lab/
 │   └── gold/eval_gold.jsonl
 ├── artifacts/                   # gitignored — predictions, scratch
 ├── results/                     # COMMITTED, small JSON + md tables
+│   ├── corpus_stats.json
 │   ├── metrics/<arm>.json
 │   ├── bench/<arm>.json
 │   └── tables/headline.md
@@ -482,7 +506,9 @@ dependencies = [
   "typer==0.27.0",
   "python-dotenv>=1.0",
   "datasets==5.0.1",      # base, not gpu: F1 streams the corpus on the laptop.
-                          # Verify it drags in no torch/nvidia wheels (F1 delta).
+                          # Verified torch-free 2026-07-31: `find_spec("torch")`
+                          # is None and no nvidia-* wheels. It pulls pyarrow,
+                          # pandas, numpy, fsspec, huggingface_hub, aiohttp.
 ]
 [project.optional-dependencies]
 dev = ["pytest==9.1.1", "ruff==0.16.0"]
@@ -499,6 +525,30 @@ gpu = [                      # NEVER installed on the laptop
 
 `metrics.py` deliberately has **no** numpy/sklearn dependency — the formulas in
 §3.5 are plain arithmetic, and this keeps the laptop install trivial.
+
+**Corpus constants** (`config.py`, applied from the F1 context deltas):
+
+```python
+CORPUS_SOURCES = ("xanderios/linkedin-job-postings",)  # HF ids, priority order
+CORPUS_TARGET_N   = 7500
+CORPUS_MIN_N      = 7000     # below this, `sxl corpus build` exits non-zero.
+# 7000 docs x 5% = ~350 eval_pool, which must exceed F3's 330 candidates.
+# 6500 would leave only ~325 and starve F3 -- do not lower these.
+CORPUS_MIN_CHARS  = 400      # drop stubs
+CORPUS_MAX_CHARS  = 40000    # drop scrape artifacts / concatenated pages
+CORPUS_DEDUPE_PREFIX_CHARS = 600   # near-duplicate window
+CORPUS_MAX_SCAN   = 200_000  # hard cap on rows read upstream (§5.4)
+CORPUS_PEEK_ROWS  = 20       # rows sampled to auto-detect the text column
+CORPUS_MIN_FREE_BYTES = 2 * 1024**3
+CORPUS_MIN_SPLIT_N = 340     # required in both `dev` and `eval_pool`
+HF_CACHE_DIR = DATA / ".hfcache"   # deleted after a successful build
+```
+
+`HF_HOME`/`HF_HUB_CACHE` are redirected to `HF_CACHE_DIR` **before** `datasets`
+is imported — `huggingface_hub` freezes the cache path into module constants at
+import time, so setting it afterwards silently fills `~/.cache/huggingface` on a
+laptop with 5 GB free. `sxl.corpus` therefore imports `datasets` inside
+`fetch_raw` only, and `tests/test_no_torch_import.py` enforces it.
 
 ### 6.2 transformers 5.x — breaking changes that will bite
 

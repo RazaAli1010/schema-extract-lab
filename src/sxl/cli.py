@@ -9,12 +9,22 @@ them. Everything not yet implemented exits 2 naming the feature that owns it.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
-from sxl.config import METRICS_DIR, PREDICTIONS_DIR
+from sxl.config import (
+    CORPUS_MIN_N,
+    CORPUS_MIN_SPLIT_N,
+    CORPUS_SOURCES,
+    CORPUS_STATS_PATH,
+    CORPUS_TARGET_N,
+    DOCS_PATH,
+    METRICS_DIR,
+    PREDICTIONS_DIR,
+)
 
 ArmOpt = Annotated[str, typer.Option("--arm", help="one of config.ARMS")]
 
@@ -54,9 +64,47 @@ def _not_yet(command: str, feature: str) -> None:
 
 # --- F1 ----------------------------------------------------------------------
 @corpus_app.command("build")
-def corpus_build() -> None:
+def corpus_build(
+    target_n: Annotated[
+        int, typer.Option("--target-n", help="documents to keep")
+    ] = CORPUS_TARGET_N,
+    source: Annotated[str, typer.Option("--source", help="HF dataset id")] = CORPUS_SOURCES[0],
+    force: Annotated[bool, typer.Option("--force/--no-force", help="re-fetch")] = False,
+) -> None:
     """Fetch and normalize the job-posting corpus into data/raw/docs.jsonl."""
-    _not_yet("corpus build", "F1")
+    from sxl.corpus import build, cleanup_hf_cache, dataset_license, report, stats_from_docs
+
+    if not force and DOCS_PATH.exists():
+        existing = stats_from_docs()
+        if existing["n_kept"] >= CORPUS_MIN_N:
+            typer.echo(f"{DOCS_PATH} already has {existing['n_kept']} rows; --force to re-fetch")
+            typer.echo(json.dumps(existing["split_counts"], sort_keys=True))
+            if not CORPUS_STATS_PATH.exists():
+                report(existing, dataset_license(existing["source"]))
+                typer.echo(f"wrote {CORPUS_STATS_PATH}")
+            raise typer.Exit(code=0)
+
+    stats = build(target_n=target_n, source=source)
+    written = report(stats, dataset_license(source))
+    cleanup_hf_cache()  # after dataset_license, which also touches the cache
+    typer.echo(f"wrote {DOCS_PATH} ({stats['n_kept']} rows)")
+    typer.echo(f"wrote {CORPUS_STATS_PATH}")
+    typer.echo(json.dumps(written["split_counts"], sort_keys=True))
+
+    problems = []
+    if stats["n_kept"] < CORPUS_MIN_N:
+        problems.append(f"kept {stats['n_kept']} documents, need >= {CORPUS_MIN_N}")
+    for split in ("dev", "eval_pool"):
+        got = stats["split_counts"][split]
+        if got < CORPUS_MIN_SPLIT_N:
+            problems.append(f"{split} has {got} documents, need >= {CORPUS_MIN_SPLIT_N}")
+    if problems:
+        for problem in problems:
+            typer.secho(f"corpus too small: {problem}", fg=typer.colors.RED, err=True)
+        typer.secho(
+            "F3 cannot sample 330 eval candidates from this.", fg=typer.colors.RED, err=True
+        )
+        raise typer.Exit(code=1)
 
 
 # --- F2 ----------------------------------------------------------------------
@@ -129,8 +177,6 @@ def schema_dump(
     out: Annotated[Path | None, typer.Option("--out", help="write here instead of stdout")] = None,
 ) -> None:
     """Print the JobPosting JSON Schema, or write it to a file."""
-    import json
-
     from sxl.io import write_json
     from sxl.schema import JSON_SCHEMA
 

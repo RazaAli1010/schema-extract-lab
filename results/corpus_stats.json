@@ -1,0 +1,23 @@
+{
+  "char_len": {
+    "max": 20933,
+    "p5": 948,
+    "p50": 3257,
+    "p95": 7592
+  },
+  "generated_at": "2026-07-31T05:00:14Z",
+  "git_sha": "0bab3ae",
+  "license": "mit",
+  "n_dropped_dup_id": 19,
+  "n_dropped_dup_prefix": 1538,
+  "n_dropped_long": 0,
+  "n_dropped_short": 70,
+  "n_kept": 7500,
+  "n_seen": 9127,
+  "source": "xanderios/linkedin-job-postings",
+  "split_counts": {
+    "dev": 387,
+    "eval_pool": 361,
+    "train": 6752
+  }
+}
