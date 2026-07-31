@@ -13,8 +13,8 @@
 ## 1. Goal
 
 Fine-tune a ~1.7B open model to extract a **strict JSON schema** from unstructured
-job postings, and prove with measured numbers that it lands close to a frontier
-teacher model at a fraction of the latency and cost.
+job postings, and prove with measured numbers that it lands close to a hosted
+teacher model (`gpt-4o-mini`) at a fraction of the latency and cost.
 
 The deliverable that matters is a **results table**, not a model. Specifically:
 
@@ -43,7 +43,10 @@ Two are already known to be optimistic and must not be assumed:
   figure at large batch. F7 must report single-stream p50/p95 **and** amortized
   per-doc cost at the best batch size, clearly labeled as different things.
 - **"200x larger model."** The teacher's parameter count is not public. Never
-  claim a size ratio. Say "frontier teacher model (`claude-sonnet-5`)".
+  claim a size ratio. Say "teacher model (`gpt-4o-mini`)". Do not call it a
+  *frontier* model either — `gpt-4o-mini` is a small, cheap hosted model, so the
+  claim being tested is "can a 1.7B fine-tune match a cheap hosted API model",
+  not "…match a frontier model".
 
 If the measured result is unflattering, the measured result ships.
 
@@ -212,7 +215,7 @@ All files are **JSONL, UTF-8, one object per line, keys in the order below**.
 {"doc_id": "jp_000001", "domain": "job_posting", "text": "...",
  "gold": { <the 16 JobPosting fields> },
  "label_source": "teacher",
- "teacher_model": "claude-sonnet-5",
+ "teacher_model": "gpt-4o-mini",
  "verified_by_human": false,
  "verified_at": null}
 ```
@@ -320,7 +323,7 @@ Fixed set. `arm` is a string key used in filenames and records.
 | `base_fewshot_constrained` | `Qwen/Qwen3-1.7B` | same | Outlines, schema-constrained | Kaggle (F5) |
 | `lora_ft` | base + LoRA adapter | minimal instruction, no shots, no schema | greedy, unconstrained | Kaggle (F6) |
 | `lora_ft_constrained` | base + LoRA adapter | same as `lora_ft` | Outlines, schema-constrained | Kaggle (F6, optional) |
-| `teacher` | `claude-sonnet-5` | production labeling prompt | API default | laptop (F2) |
+| `teacher` | `gpt-4o-mini` | production labeling prompt | API default | laptop (F2) |
 
 `base_fewshot` is **the competitor that matters**. If the fine-tune does not beat
 it, that is the finding and it gets reported. The `*_constrained` arms exist to
@@ -475,7 +478,7 @@ requires-python = ">=3.11"
 dependencies = [
   "pydantic==2.13.4",
   "jsonschema==4.26.0",
-  "anthropic==0.120.2",
+  "openai==2.51.0",
   "typer==0.27.0",
   "python-dotenv>=1.0",
   "datasets==5.0.1",      # base, not gpu: F1 streams the corpus on the laptop.
@@ -561,14 +564,16 @@ the timing loop.
 - Fallback student if Qwen3 misbehaves: `meta-llama/Llama-3.2-1B-Instruct`
   (gated — needs an accepted HF license). Qwen3 is preferred precisely because it
   is ungated and works on Kaggle without token gymnastics.
-- Teacher: **`claude-sonnet-5`** via the Anthropic **Batch API** (50% discount,
-  24h SLA). Alternative if budget is tight: `claude-haiku-4-5-20251001`.
-  Whichever is used is recorded in `teacher_model` on every row and must be
-  constant within a run.
+- Teacher: **`gpt-4o-mini`** via the OpenAI **Batch API** (50% discount, 24h
+  SLA). Alternative if label quality proves too weak: `gpt-4o`. Whichever is
+  used is recorded in `teacher_model` on every row and must be constant within
+  a run.
 
 **Budget.** ~5700 docs × ~1.2k input + ~350 output tokens ≈ 6.8M in / 2.0M out.
-At Sonnet-5 batch rates ($1/$5 per M) that is **≈ $17**. `MAX_TEACHER_SPEND_USD
-= 25.0` in `config.py` is a hard stop, not a guideline (§F2).
+At `gpt-4o-mini` batch rates ($0.075/$0.30 per M — half the $0.15/$0.60 standard
+rates) that is **≈ $1.10**. `MAX_TEACHER_SPEND_USD = 25.0` in `config.py` is a
+hard stop, not a guideline (§F2) — it now sits far above the estimate, so it
+protects against a runaway loop rather than acting as a live budget ceiling.
 
 ### 6.6 GPU-hour budget (of ~30/week)
 

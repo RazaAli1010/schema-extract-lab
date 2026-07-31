@@ -68,7 +68,7 @@ verbatim. `sxl gpu *` subcommands must import `sxl.gpu.*` **lazily inside the
 command body**.
 
 **Pinned base deps (SPEC §6.1):** `pydantic==2.13.4`, `jsonschema==4.26.0`,
-`anthropic==0.120.2`, `typer==0.27.0`, `python-dotenv>=1.0`, `datasets==5.0.1`;
+`openai==2.51.0`, `typer==0.27.0`, `python-dotenv>=1.0`, `datasets==5.0.1`;
 dev: `pytest==9.1.1`, `ruff==0.16.0`; gpu extra declared but never installed here.
 
 `datasets` sits in **base**, not `gpu`, because F1 streams the corpus on the
@@ -113,7 +113,7 @@ none — F0 implements the shared contract, it does not extend it.
    N_TRAIN_TARGET, N_DEV_TARGET, N_EVAL_GOLD = 5000, 300, 300
    MAX_INPUT_CHARS, MAX_NEW_TOKENS, TEMPERATURE, N_FEWSHOT = 6000, 512, 0.0, 3
 
-   TEACHER_MODEL = "claude-sonnet-5"
+   TEACHER_MODEL = "gpt-4o-mini"
    MAX_TEACHER_SPEND_USD = 25.0
    TEACHER_MAX_RETRIES = 3
 
@@ -193,7 +193,7 @@ none — F0 implements the shared contract, it does not extend it.
 
 8. **Repo hygiene** — `.gitignore` covering `data/`, `artifacts/`, `.env`,
    `*.safetensors`, `*.bin`, `*.pt`, `__pycache__`, `.venv`; `.gitkeep` in each
-   ignored dir; `.env.example` with `ANTHROPIC_API_KEY=` and `HF_TOKEN=`;
+   ignored dir; `.env.example` with `OPENAI_API_KEY=` and `HF_TOKEN=`;
    a `Makefile` with `install`, `test`, `lint`, `fmt` targets; empty
    `src/sxl/gpu/__init__.py` carrying only a module docstring warning that
    nothing here may be imported at package import time.
@@ -203,7 +203,7 @@ none — F0 implements the shared contract, it does not extend it.
 ### Out of scope
 
 - Any corpus download or network call — F1.
-- Anything that talks to the Anthropic API — F2.
+- Anything that talks to the OpenAI API — F2.
 - Metric arithmetic — F4 (this feature only defines the field taxonomy it needs).
 - Any file under `src/sxl/gpu/` beyond the empty `__init__.py` — F5/F6/F7.
 - Prompt text — F5 owns `prompts.py`; F0 only puts the four constants in `config.py`.
