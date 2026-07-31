@@ -12,8 +12,25 @@ import textwrap
 def test_importing_sxl_does_not_import_torch():
     code = textwrap.dedent("""
         import sys
-        import sxl, sxl.cli, sxl.metrics, sxl.schema, sxl.teacher
+        import sxl, sxl.cli, sxl.corpus, sxl.metrics, sxl.schema, sxl.teacher
         assert "torch" not in sys.modules, sorted(m for m in sys.modules if "torch" in m)
+    """)
+    assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
+def test_importing_sxl_corpus_does_not_import_datasets():
+    """F1's `datasets` import must stay inside `fetch_raw`.
+
+    Not style: `huggingface_hub` freezes the cache path into module constants at
+    import time, so hoisting the import would make `_set_hf_cache()` a silent
+    no-op and fill `~/.cache/huggingface` on a laptop with 5 GB free (SPEC §2.1).
+    """
+    code = textwrap.dedent("""
+        import sys
+        import sxl.corpus, sxl.cli
+        assert "datasets" not in sys.modules, sorted(
+            m for m in sys.modules if m.startswith(("datasets", "huggingface_hub"))
+        )
     """)
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
 

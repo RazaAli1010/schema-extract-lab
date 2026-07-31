@@ -25,6 +25,12 @@ EVAL_GOLD_PATH = DATA / "gold" / "eval_gold.jsonl"
 PREDICTIONS_DIR = ARTIFACTS / "predictions"
 METRICS_DIR = RESULTS / "metrics"
 BENCH_DIR = RESULTS / "bench"
+CORPUS_STATS_PATH = RESULTS / "corpus_stats.json"
+
+# Hugging Face downloads are redirected here so a build never fills ~/.cache on a
+# 5 GB-free laptop (SPEC §2.1). Under DATA, so `data/**` in .gitignore covers it.
+# F1 deletes this directory after a successful build.
+HF_CACHE_DIR = DATA / ".hfcache"
 
 # --- determinism -------------------------------------------------------------
 SEED = 1337
@@ -33,6 +39,23 @@ ARMS = ("base_fewshot", "base_fewshot_constrained", "lora_ft", "lora_ft_constrai
 
 # --- split targets (SPEC §3.4) ----------------------------------------------
 N_TRAIN_TARGET, N_DEV_TARGET, N_EVAL_GOLD = 5000, 300, 300
+
+# --- corpus (F1) -------------------------------------------------------------
+# The original pick, `lukebarousse/data_jobs`, is metadata-only: 17 short columns
+# (job_title, job_location, salary_year_avg, ...), no description field, longest
+# string ~85 chars. Every row would have failed CORPUS_MIN_CHARS and the build
+# would have emitted an empty corpus. Replaced 2026-07-31.
+CORPUS_SOURCES = ("xanderios/linkedin-job-postings",)  # HF dataset ids, priority order
+CORPUS_TARGET_N = 7500
+CORPUS_MIN_N = 7000  # 7000 x 5% ~= 350 eval_pool, which must exceed F3's 330
+# candidates. 6500 would leave only ~325 and starve F3 -- do not lower these.
+CORPUS_MIN_CHARS = 400  # drop stubs
+CORPUS_MAX_CHARS = 40000  # drop scrape artifacts / concatenated pages
+CORPUS_DEDUPE_PREFIX_CHARS = 600  # near-duplicate window
+CORPUS_MAX_SCAN = 200_000  # hard cap on rows read upstream (SPEC §5.4)
+CORPUS_PEEK_ROWS = 20  # rows sampled to auto-detect the text column
+CORPUS_MIN_FREE_BYTES = 2 * 1024**3  # refuse to start a build below this
+CORPUS_MIN_SPLIT_N = 340  # required in both `dev` and `eval_pool`
 
 # --- prompt / generation constants (SPEC §3.6), identical in every arm --------
 MAX_INPUT_CHARS, MAX_NEW_TOKENS, TEMPERATURE, N_FEWSHOT = 6000, 512, 0.0, 3
