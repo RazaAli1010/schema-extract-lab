@@ -49,6 +49,26 @@ def test_importing_sxl_teacher_does_not_import_openai():
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
 
 
+def test_importing_sxl_metrics_does_not_import_a_numeric_stack():
+    """F4 acceptance: the metric formulas are plain integer arithmetic (SPEC §3.5).
+
+    sklearn would drag scipy (~90 MB) onto a laptop with 5 GB free for four
+    divisions. `sxl.metrics` is imported here together with the modules it reaches
+    at scoring time, so a numpy import smuggled into `normalize` or `verify` fails
+    this too.
+    """
+    code = textwrap.dedent("""
+        import sys
+        import sxl.metrics, sxl.normalize, sxl.verify
+        banned = sorted(
+            m for m in sys.modules
+            if m.split(".")[0] in {"numpy", "scipy", "sklearn", "pandas"}
+        )
+        assert not banned, banned
+    """)
+    assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
 def test_the_anthropic_sdk_is_not_installed():
     """One LLM client only (SPEC §6.5).
 

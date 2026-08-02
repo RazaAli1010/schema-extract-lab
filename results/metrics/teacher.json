@@ -1,0 +1,125 @@
+{
+  "arm": "teacher",
+  "split": "eval_gold",
+  "n": 300,
+  "schema_valid_rate": 1.0,
+  "macro_f1": 0.9246,
+  "macro_f1_null_baseline": 0.0,
+  "n_missing_predictions": 0,
+  "per_field": {
+    "title": {
+      "em": 0.9933,
+      "precision": 0.9932,
+      "recall": 0.9966,
+      "f1": 0.9949,
+      "support": 294
+    },
+    "company": {
+      "em": 0.9767,
+      "precision": 0.9753,
+      "recall": 0.9958,
+      "f1": 0.9854,
+      "support": 238
+    },
+    "employment_type": {
+      "em": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 295
+    },
+    "seniority": {
+      "em": 0.98,
+      "precision": 0.9774,
+      "recall": 0.9774,
+      "f1": 0.9774,
+      "support": 265
+    },
+    "remote_mode": {
+      "em": 0.9933,
+      "precision": 1.0,
+      "recall": 0.9901,
+      "f1": 0.995,
+      "support": 203
+    },
+    "location_city": {
+      "em": 0.99,
+      "precision": 0.993,
+      "recall": 0.986,
+      "f1": 0.9895,
+      "support": 143
+    },
+    "location_region": {
+      "em": 0.96,
+      "precision": 0.9444,
+      "recall": 0.9225,
+      "f1": 0.9333,
+      "support": 129
+    },
+    "location_country": {
+      "em": 0.9933,
+      "precision": 0.9926,
+      "recall": 1.0,
+      "f1": 0.9963,
+      "support": 268
+    },
+    "salary_min": {
+      "em": 0.9833,
+      "precision": 0.9798,
+      "recall": 0.9604,
+      "f1": 0.97,
+      "support": 101
+    },
+    "salary_max": {
+      "em": 0.99,
+      "precision": 1.0,
+      "recall": 0.9703,
+      "f1": 0.9849,
+      "support": 101
+    },
+    "salary_currency": {
+      "em": 0.99,
+      "precision": 1.0,
+      "recall": 0.9706,
+      "f1": 0.9851,
+      "support": 102
+    },
+    "salary_period": {
+      "em": 0.99,
+      "precision": 1.0,
+      "recall": 0.9712,
+      "f1": 0.9854,
+      "support": 104
+    },
+    "years_experience_min": {
+      "em": 0.98,
+      "precision": 0.9822,
+      "recall": 0.9822,
+      "f1": 0.9822,
+      "support": 225
+    },
+    "education_level": {
+      "em": 0.95,
+      "precision": 0.9365,
+      "recall": 0.9779,
+      "f1": 0.9568,
+      "support": 181
+    },
+    "required_skills": {
+      "em": 0.97,
+      "precision": 0.9832,
+      "recall": 0.9813,
+      "f1": 0.9822,
+      "support": 1549
+    },
+    "posting_date": {
+      "em": 0.1833,
+      "precision": 0.0392,
+      "recall": 1.0,
+      "f1": 0.0755,
+      "support": 10
+    }
+  },
+  "generated_at": "2026-08-02T10:08:04Z",
+  "git_sha": "35095a2"
+}

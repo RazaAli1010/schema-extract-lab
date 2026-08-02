@@ -53,12 +53,17 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
-def write_json(path: Path, obj: Any) -> None:
-    """Write pretty JSON atomically: sorted keys, indent 2, trailing newline."""
+def write_json(path: Path, obj: Any, *, sort_keys: bool = True) -> None:
+    """Write pretty JSON atomically: sorted keys, indent 2, trailing newline.
+
+    `sort_keys=False` preserves insertion order, for the one artifact where key
+    order is part of the contract: F4's `per_field` must read in `FIELD_NAMES`
+    order (SPEC §3.2), which alphabetizing would destroy.
+    """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")
     with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
-        json.dump(obj, fh, ensure_ascii=False, indent=2, sort_keys=True)
+        json.dump(obj, fh, ensure_ascii=False, indent=2, sort_keys=sort_keys)
         fh.write("\n")
     os.replace(tmp, path)

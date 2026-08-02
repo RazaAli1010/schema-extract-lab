@@ -1,0 +1,26 @@
+{
+  "reviewer": "model_verified",
+  "what_this_is": "eval_gold was reviewed by a language model, not a human (verify.REVIEWERS). The `teacher` arm therefore measures model-vs-model agreement, and no arm in this project is scored against human-checked ground truth.",
+  "method": "Targeted review. Three uniform mechanical passes were applied to all 330 candidates (posting_date nulled where the source text provably contains no date; 'unknown' removed from str|None fields; education_level 'none' -> 'unknown' where no education token appears). Documents carrying an F3 confidence hint or an open posting_date decision were then read end to end. The remainder ship on the teacher's labels plus the mechanical fixes, with their error rate measured by a seeded random sample rather than assumed.",
+  "n_candidates": 330,
+  "n_rejected": 1,
+  "n_final": 300,
+  "n_read_end_to_end": 210,
+  "n_read_end_to_end_in_final_300": 187,
+  "n_shipped_unread": 113,
+  "residual_error_sample": {
+    "n": 28,
+    "strata": "20 from the un-hinted stratum + 8 from the skills-only-hinted stratum",
+    "docs_with_at_least_one_error": 7,
+    "doc_error_rate": 0.25,
+    "fields_corrected_per_doc": 0.3571,
+    "note": "Applies ONLY to documents accepted without a full read. Errors that the mechanical passes already fix are excluded, so this is the rate of residual error a reader would still have caught."
+  },
+  "caveats": [
+    "Not human-verified; label_source is 'model_verified' on every row.",
+    "One seed, one reviewer, no adjudication between independent reviewers.",
+    "posting_date is the dominant teacher failure: 281/330 candidates carried a YYYY-MM-DD value but only 12 were traceable to their source text, and 257 were the identical fabricated value 2023-10-01."
+  ],
+  "generated_at": "2026-08-02T10:08:45Z",
+  "git_sha": "35095a2"
+}

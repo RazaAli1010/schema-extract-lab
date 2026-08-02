@@ -52,6 +52,7 @@ from sxl.config import (
     TRAIN_PATH,
     git_sha,
 )
+from sxl.config import utc_now as _now  # the one `generated_at` clock (SPEC §5.2)
 from sxl.io import append_jsonl, read_jsonl, write_json, write_jsonl
 from sxl.normalize import is_absent, norm_field, norm_skills, norm_str
 from sxl.prompts import truncate
@@ -66,6 +67,16 @@ from sxl.teacher import ROW_KEYS
 
 #: Progress-log actions. `edit` carries field/old/new; the other two carry nulls.
 ACTIONS = ("accept", "edit", "reject_doc")
+
+#: Who performed the review, recorded verbatim into `eval_gold.label_source`.
+#:
+#: SPEC §3.3 assumes `"human"`, because the `teacher` arm exists to measure
+#: teacher-vs-**human** disagreement (SPEC §3.6). `"model_verified"` records a
+#: pass done by a language model instead. It is not an equivalent substitute and
+#: must never be relabeled as one: against a model-verified eval set the teacher
+#: arm measures model-vs-model agreement, and every other arm's macro-F1 is
+#: measured against labels no person ever checked. F8 must say so in the README.
+REVIEWERS = ("human", "model_verified")
 
 #: Fields whose value should literally appear in the source document. A value the
 #: teacher produced that is nowhere in the text is a likely hallucination, so it is
@@ -162,10 +173,6 @@ class GoldPaths:
 
 def _resolve(paths: GoldPaths | None) -> GoldPaths:
     return paths if paths is not None else GoldPaths.default()
-
-
-def _now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 # --- stratified sampling ------------------------------------------------------
@@ -836,13 +843,21 @@ def teacher_field_agreement(
     }
 
 
-def finalize(*, paths: GoldPaths | None = None, n: int = N_EVAL_GOLD) -> dict[str, Any]:
-    """Replay the log, drop rejects, and write exactly `n` human-verified rows.
+def finalize(
+    *, paths: GoldPaths | None = None, n: int = N_EVAL_GOLD, reviewer: str = "human"
+) -> dict[str, Any]:
+    """Replay the log, drop rejects, and write exactly `n` verified rows.
 
     The first `n` by `doc_id` -- not the first `n` reviewed -- so the output is a
     pure function of (candidates, progress) and does not depend on review order.
+
+    `reviewer` is written straight through to `label_source`, and
+    `verified_by_human` is derived from it rather than hardcoded: an eval set that
+    no person checked must not claim on disk that one did (see `REVIEWERS`).
     """
     paths = _resolve(paths)
+    if reviewer not in REVIEWERS:
+        raise GoldError(f"unknown reviewer {reviewer!r}; expected one of {' | '.join(REVIEWERS)}")
     candidates = sorted(read_jsonl(paths.candidates), key=lambda r: r["doc_id"])
     if not candidates:
         raise GoldError(f"{paths.candidates} is empty — run `sxl gold sample` first")
@@ -867,10 +882,10 @@ def finalize(*, paths: GoldPaths | None = None, n: int = N_EVAL_GOLD) -> dict[st
             "domain": row["domain"],
             "text": row["text"],
             "gold": {name: row["gold"][name] for name in FIELD_NAMES},
-            "label_source": "human",
-            # Retained so the audit trail records *what the human was correcting*.
+            "label_source": reviewer,
+            # Retained so the audit trail records *what the reviewer was correcting*.
             "teacher_model": row["teacher_model"],
-            "verified_by_human": True,
+            "verified_by_human": reviewer == "human",
             "verified_at": st.verified_at,
         }
         if tuple(out) != ROW_KEYS:
@@ -884,6 +899,7 @@ def finalize(*, paths: GoldPaths | None = None, n: int = N_EVAL_GOLD) -> dict[st
 
     kept = {r["doc_id"] for r in final}
     stats = {
+        "reviewer": reviewer,
         "n_candidates": len(candidates),
         "n_rejected": _counts(state)["n_rejected"],
         "n_final": len(final),
@@ -912,9 +928,9 @@ def _char_len_bins(rows: Sequence[Mapping[str, Any]]) -> dict[str, int]:
     return bins
 
 
-#: Below this, a field's teacher prompt is ambiguous enough that 5,000 training
-#: rows are being poisoned by it (F3 Implementation notes). Cheaper to catch here
-#: than in F8.
+#: Below this, a field's teacher prompt is ambiguous enough that the 4,500
+#: training rows are being poisoned by it (F3 Implementation notes). Cheaper to
+#: catch here than in F8.
 AGREEMENT_FLOOR = 0.75
 
 

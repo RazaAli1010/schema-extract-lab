@@ -7,6 +7,7 @@ anything heavier than the standard library.
 from __future__ import annotations
 
 import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
 
 # --- paths -------------------------------------------------------------------
@@ -146,6 +147,15 @@ def ensure_dirs() -> None:
     """Create every directory this project writes to. Idempotent."""
     for d in _DIRS:
         d.mkdir(parents=True, exist_ok=True)
+
+
+def utc_now() -> str:
+    """`generated_at` for every artifact: UTC, second precision, trailing Z.
+
+    Defined once here rather than per-feature so that `results/*.json` written by
+    different stages sort and diff against each other (SPEC §5.2).
+    """
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def git_sha() -> str:
