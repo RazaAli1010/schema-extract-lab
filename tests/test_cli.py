@@ -14,7 +14,6 @@ runner = CliRunner()
 # command -> the feature that owns it (SPEC §8). A feature deletes its entry when it
 # lands and replaces it with a `--help`-only test below.
 UNIMPLEMENTED = {
-    ("metrics", "score"): "F4",
     ("gpu", "predict"): "F5",
     ("gpu", "train"): "F6",
     ("gpu", "bench"): "F7",
@@ -72,6 +71,26 @@ def test_gold_commands_are_implemented_and_expose_their_options():
     assert result.exit_code == 0
     for option in ("--n", "--seed", "--force"):
         assert option in result.output
+
+
+def test_metrics_commands_are_implemented_and_expose_their_options():
+    """F4 owns `metrics score|compare`; neither may exit 2 any more."""
+    result = runner.invoke(app, ["metrics", "--help"])
+    assert result.exit_code == 0
+    for command in ("score", "compare"):
+        assert command in result.output
+
+    result = runner.invoke(app, ["metrics", "score", "--help"])
+    assert result.exit_code == 0
+    for option in ("--arm", "--pred", "--gold", "--out", "--expect-n"):
+        assert option in result.output
+
+
+def test_metrics_score_rejects_an_unknown_arm_with_exit_1():
+    """Exit 1, not 2: exit 2 means "not implemented" throughout this CLI."""
+    result = runner.invoke(app, ["metrics", "score", "--arm", "nope"])
+    assert result.exit_code == 1
+    assert "base_fewshot" in result.output  # the valid arms are listed
 
 
 def test_schema_dump_to_stdout():

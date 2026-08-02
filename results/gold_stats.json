@@ -1,0 +1,52 @@
+{
+  "char_len_bins": {
+    "1500-3000": 88,
+    "3000-8000": 151,
+    "400-1500": 45,
+    "8000-40000": 16
+  },
+  "edit_rate_by_field": {
+    "company": 0.0433,
+    "education_level": 0.05,
+    "employment_type": 0.0,
+    "location_city": 0.01,
+    "location_country": 0.01,
+    "location_region": 0.04,
+    "posting_date": 0.8333,
+    "remote_mode": 0.0067,
+    "required_skills": 0.03,
+    "salary_currency": 0.01,
+    "salary_max": 0.01,
+    "salary_min": 0.0167,
+    "salary_period": 0.01,
+    "seniority": 0.02,
+    "title": 0.0067,
+    "years_experience_min": 0.02
+  },
+  "generated_at": "2026-08-02T10:07:47Z",
+  "git_sha": "35095a2",
+  "median_seconds_per_doc": 0.0,
+  "n_candidates": 330,
+  "n_docs_edited": 259,
+  "n_final": 300,
+  "n_rejected": 1,
+  "reviewer": "model_verified",
+  "teacher_field_agreement": {
+    "company": 0.9567,
+    "education_level": 0.95,
+    "employment_type": 1.0,
+    "location_city": 0.99,
+    "location_country": 0.99,
+    "location_region": 0.96,
+    "posting_date": 0.1667,
+    "remote_mode": 0.9933,
+    "required_skills": 0.97,
+    "salary_currency": 0.99,
+    "salary_max": 0.99,
+    "salary_min": 0.9833,
+    "salary_period": 0.99,
+    "seniority": 0.98,
+    "title": 0.9933,
+    "years_experience_min": 0.98
+  }
+}

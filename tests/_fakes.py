@@ -128,6 +128,47 @@ def write_candidates(paths: Any, rows: list[dict[str, Any]]) -> None:
     write_jsonl(paths.candidates, sorted(rows, key=lambda r: r["doc_id"]))
 
 
+# --- F4 metrics fixtures ------------------------------------------------------
+
+
+def gold_row(doc: dict[str, Any], **over: Any) -> dict[str, Any]:
+    """One `eval_gold.jsonl` row: `labeled_row` after human verification."""
+    return labeled_row(doc, **over) | {
+        "label_source": "human",
+        "verified_by_human": True,
+        "verified_at": "2026-08-01T00:00:00Z",
+    }
+
+
+def prediction_row(
+    doc_id: str,
+    parsed: dict[str, Any] | None,
+    *,
+    arm: str = "base_fewshot",
+    schema_valid: bool | None = None,
+    **over: Any,
+) -> dict[str, Any]:
+    """One `artifacts/predictions/<arm>.jsonl` row, keys in SPEC §3.3 order.
+
+    `schema_valid` is derived from the real `validate_prediction` unless a test
+    passes it explicitly — the integrity tests need to write the two out of sync
+    on purpose, but nothing else should have to think about it.
+    """
+    from sxl.schema import validate_prediction
+
+    valid = (validate_prediction(parsed) is not None) if schema_valid is None else schema_valid
+    return {
+        "doc_id": doc_id,
+        "arm": arm,
+        "raw_output": "" if parsed is None else json.dumps(parsed),
+        "parsed": parsed,
+        "schema_valid": valid,
+        "latency_ms": 1234.5,
+        "prompt_tokens": 1180,
+        "completion_tokens": 143,
+    } | over
+
+
 def scripted(answers: list[str]) -> Any:
     """A `read_line` that replays `answers`, then behaves like a closed terminal.
 

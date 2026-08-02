@@ -102,14 +102,39 @@ world knowledge:
   company's headquarters.
 - A posting that does not state a degree requirement gets
   education_level: "unknown" -- not the degree typical for the role.
+- A posting that does not carry a date gets posting_date: null -- never
+  today's date, never a guess from the writing style, never a date carried
+  over from an earlier posting.
 - required_skills contains only skills the posting actually names."""
+
+#: F4 measured the teacher at posting_date precision 0.039 / recall 1.000 against
+#: the gold set: it emitted the *same* invented date (2023-10-01) on 257 of 330
+#: documents while missing none of the 10 real ones. That is a pure
+#: false-positive failure, so the rule below is stated as its own block rather
+#: than as one more bullet in `_COPY_DONT_INFER_RULE` -- the field needs a
+#: default-to-null instruction, not just a don't-infer instruction.
+_POSTING_DATE_RULE = """\
+posting_date needs one more rule, because it is the field most often invented:
+
+- Emit a date ONLY if the posting text literally contains the date it was
+  posted. Point to the characters you are copying. If you cannot, emit null.
+- Most postings carry no date at all. null is the expected answer, not the
+  exceptional one. Do not fill this field to make the object look complete.
+- A relative phrase ("posted 3 days ago", "reposted last week") is NOT a date:
+  you have no reference point to resolve it against. Emit null.
+- Deadlines, start dates, interview dates and copyright years are not the
+  posting date. Emit null unless the text dates the posting itself.
+- posting_date is not an enum. The string "unknown" is not a valid value --
+  absence is null."""
 
 _FORMAT_RULE = """\
 Normalize these formats:
 
 - location_country: ISO-3166 alpha-2, uppercase (e.g. "US", "GB", "DE").
 - salary_currency: ISO-4217, uppercase (e.g. "USD", "EUR").
-- posting_date: YYYY-MM-DD.
+- posting_date: YYYY-MM-DD when the posting carries a date, null otherwise. A
+  posting dated only "October 2023" is not a YYYY-MM-DD date; emit null rather
+  than inventing a day.
 - salary_min / salary_max: plain numbers, no currency symbols, no thousands
   separators. Keep the period the posting uses and record it in salary_period.
 - required_skills: short lowercase skill names, deduplicated (e.g.
@@ -126,6 +151,8 @@ The object must conform to this JSON Schema:
 {NULL_UNKNOWN_RULE}
 
 {_COPY_DONT_INFER_RULE}
+
+{_POSTING_DATE_RULE}
 
 {_FORMAT_RULE}
 

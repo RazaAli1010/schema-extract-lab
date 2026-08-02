@@ -28,7 +28,6 @@ import shutil
 import statistics
 import unicodedata
 from collections.abc import Iterable, Iterator
-from datetime import UTC, datetime
 from typing import Any
 
 from sxl.config import (
@@ -46,6 +45,7 @@ from sxl.config import (
     HF_CACHE_DIR,
     ensure_dirs,
     git_sha,
+    utc_now,
 )
 from sxl.io import read_jsonl, write_json, write_jsonl
 from sxl.splits import split_for
@@ -397,7 +397,7 @@ def report(stats: dict[str, Any], license_: str | None = None) -> dict[str, Any]
         "n_kept": stats["n_kept"],
         "char_len": stats["char_len"],
         "split_counts": stats["split_counts"],
-        "generated_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "generated_at": utc_now(),
         "git_sha": git_sha(),
     }
     write_json(CORPUS_STATS_PATH, out)

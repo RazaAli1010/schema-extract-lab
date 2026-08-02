@@ -20,6 +20,7 @@ from sxl.splits import split_for
 from sxl.teacher import ROW_KEYS
 from sxl.verify import (
     AGREEMENT_FLOOR,
+    GoldError,
     GoldPaths,
     LeakageDetected,
     NotEnoughVerified,
@@ -92,6 +93,29 @@ def test_every_output_row_matches_the_spec_record_shape(tmp_path):
             datetime.strptime(row["verified_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC).tzinfo
             is UTC
         )
+
+
+def test_a_model_verified_run_does_not_claim_a_human_checked_it(tmp_path):
+    """The one field that must never be fabricated (`verify.REVIEWERS`).
+
+    An eval set nobody read has to say so on disk: `verified_by_human` is derived
+    from `reviewer`, so there is no path that writes `True` without a human.
+    """
+    paths, _ = _setup(tmp_path, n_accept=302)
+    stats = finalize(paths=paths, reviewer="model_verified")
+
+    assert stats["reviewer"] == "model_verified"
+    for row in read_jsonl(paths.gold):
+        assert tuple(row) == ROW_KEYS, "the record shape does not change with the reviewer"
+        assert row["label_source"] == "model_verified"
+        assert row["verified_by_human"] is False
+
+
+def test_finalize_rejects_an_unknown_reviewer(tmp_path):
+    paths, _ = _setup(tmp_path, n_accept=302)
+    with pytest.raises(GoldError, match="unknown reviewer"):
+        finalize(paths=paths, reviewer="a_friend_of_mine")
+    assert not paths.gold.exists(), "a rejected run must not write a gold file"
 
 
 def test_rejected_documents_never_reach_the_output(tmp_path):

@@ -25,7 +25,6 @@ import math
 import time
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +62,7 @@ from sxl.config import (
     ensure_dirs,
     git_sha,
 )
+from sxl.config import utc_now as _now  # the one `generated_at`/`at` clock (SPEC §5.2)
 from sxl.io import append_jsonl, read_jsonl, write_json, write_jsonl
 from sxl.prompts import (
     PROMPT_VERSION,
@@ -239,10 +239,6 @@ def build_request(doc: Mapping[str, Any], model: str = TEACHER_MODEL) -> dict[st
     }
 
 
-def _now() -> str:
-    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-
-
 def parse_result_line(
     line: Mapping[str, Any], *, model: str, prompt_sha_: str, batch_id: str
 ) -> dict[str, Any]:
@@ -401,8 +397,8 @@ def field_null_rate(rows: Sequence[Mapping[str, Any]]) -> dict[str, float]:
 def enum_distribution(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, int]]:
     """Counts per enum member, **including members with zero occurrences**.
 
-    `"principal": 0` across 5,000 postings is real signal that the prompt never
-    surfaces that level; a plain `Counter` would silently omit it.
+    `"principal": 0` across 4,500 training postings is real signal that the prompt
+    never surfaces that level; a plain `Counter` would silently omit it.
     """
     out: dict[str, dict[str, int]] = {}
     for field in FIELD_NAMES:

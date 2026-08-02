@@ -16,16 +16,18 @@ from typing import Annotated
 import typer
 
 from sxl.config import (
+    ARMS,
     CORPUS_MIN_N,
     CORPUS_MIN_SPLIT_N,
     CORPUS_SOURCES,
     CORPUS_STATS_PATH,
     CORPUS_TARGET_N,
     DOCS_PATH,
+    EVAL_GOLD_PATH,
     MAX_TEACHER_SPEND_USD,
     METRICS_DIR,
+    N_EVAL_GOLD,
     N_GOLD_CANDIDATES,
-    PREDICTIONS_DIR,
     SEED,
     TEACHER_MODEL,
     TEACHER_PRICE_USD,
@@ -286,14 +288,25 @@ def gold_verify() -> None:
 
 
 @gold_app.command("finalize")
-def gold_finalize() -> None:
+def gold_finalize(
+    reviewer: Annotated[
+        str, typer.Option("--reviewer", help="who reviewed: human | model_verified")
+    ] = "human",
+) -> None:
     """Replay the review log into data/gold/eval_gold.jsonl and gold_stats.json."""
-    from sxl.verify import GoldError, GoldPaths, agreement_warnings, finalize
+    from sxl.verify import REVIEWERS, GoldError, GoldPaths, agreement_warnings, finalize
 
     ensure_dirs()
     paths = GoldPaths.default()
+    if reviewer not in REVIEWERS:
+        typer.secho(
+            f"unknown --reviewer {reviewer!r}; expected one of {' | '.join(REVIEWERS)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
     try:
-        stats = finalize(paths=paths)
+        stats = finalize(paths=paths, reviewer=reviewer)
     except GoldError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
@@ -310,6 +323,16 @@ def gold_finalize() -> None:
     worst = sorted(stats["teacher_field_agreement"].items(), key=lambda kv: kv[1])[:5]
     typer.echo("lowest teacher agreement: " + "  ".join(f"{k}={v:.2f}" for k, v in worst))
 
+    if reviewer != "human":
+        # Loud, every run: this is the caveat that qualifies every number downstream.
+        typer.secho(
+            f"eval_gold was reviewed by {reviewer!r}, not a human. The `teacher` arm now "
+            "measures model-vs-model agreement, and no arm is scored against human-checked "
+            "ground truth. F8 must state this in the README.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+
     problems = agreement_warnings(stats["teacher_field_agreement"])
     if problems:
         for problem in problems:
@@ -321,13 +344,118 @@ def gold_finalize() -> None:
 @metrics_app.command("score")
 def metrics_score(
     arm: ArmOpt = "",
-    predictions: Annotated[
-        Path, typer.Option("--predictions", help="predictions dir")
-    ] = PREDICTIONS_DIR,
-    out: Annotated[Path, typer.Option("--out", help="results/metrics dir")] = METRICS_DIR,
+    pred: Annotated[
+        Path | None,
+        typer.Option(
+            "--pred", help="predictions JSONL [default: artifacts/predictions/<arm>.jsonl]"
+        ),
+    ] = None,
+    gold: Annotated[
+        Path | None, typer.Option("--gold", help=f"gold JSONL [default: {EVAL_GOLD_PATH}]")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", help="output JSON [default: results/metrics/<arm>.json]")
+    ] = None,
+    expect_n: Annotated[
+        int, typer.Option("--expect-n", help="required gold row count; 0 disables the check")
+    ] = N_EVAL_GOLD,
 ) -> None:
     """Score an arm's predictions against eval_gold."""
-    _not_yet("metrics score", "F4")
+    from sxl.io import read_jsonl
+    from sxl.metrics import (
+        MetricsError,
+        MetricsPaths,
+        report_lines,
+        score_arm_files,
+        write_metrics,
+    )
+    from sxl.verify import GoldError
+
+    ensure_dirs()
+    paths = MetricsPaths.default()
+
+    # Exit 1, not typer's usual 2: in this repo exit 2 means "not implemented" and
+    # must stay unambiguous (see `_not_yet`).
+    if arm not in ARMS:
+        typer.secho(
+            f"unknown --arm {arm!r}; expected one of {' | '.join(ARMS)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    gold_path = gold if gold is not None else paths.gold
+    out_path = out if out is not None else paths.out_for(arm)
+    if not gold_path.exists():
+        typer.secho(
+            f"{gold_path} does not exist; run `sxl gold finalize` first",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    if expect_n:
+        n_gold = sum(1 for _ in read_jsonl(gold_path))
+        if n_gold != expect_n:
+            typer.secho(
+                f"{gold_path} has {n_gold} rows, expected {expect_n}. "
+                "Scoring a partial gold set produces a number that is not comparable "
+                "to the other arms — pass --expect-n 0 if that is genuinely intended.",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    try:
+        result = score_arm_files(arm, pred_path=pred, gold_path=gold_path, paths=paths)
+    except (MetricsError, GoldError, ValueError) as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+    except FileNotFoundError as exc:
+        typer.secho(f"missing input: {exc}", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    write_metrics(result, out_path)
+    typer.echo(f"wrote {out_path}")
+    typer.echo(
+        json.dumps(
+            {
+                k: result[k]
+                for k in (
+                    "arm",
+                    "n",
+                    "schema_valid_rate",
+                    "macro_f1",
+                    "macro_f1_null_baseline",
+                    "n_missing_predictions",
+                )
+            },
+            sort_keys=True,
+        )
+    )
+    for line in report_lines(result):
+        typer.echo(line)
+
+
+@metrics_app.command("compare")
+def metrics_compare(
+    metrics_dir: Annotated[
+        Path, typer.Option("--metrics-dir", help="directory of <arm>.json files")
+    ] = METRICS_DIR,
+) -> None:
+    """Print every scored arm side by side, best macro_f1 first."""
+    from sxl.metrics import compare_lines, load_metrics
+
+    results = load_metrics(metrics_dir)
+    if not results:
+        typer.secho(
+            f"no metrics found in {metrics_dir}; run `sxl metrics score --arm <arm>` first",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    for line in compare_lines(results):
+        typer.echo(line)
 
 
 # --- F5/F6/F7 — Kaggle only. Imports go INSIDE the bodies. -------------------

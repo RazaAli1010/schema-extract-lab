@@ -198,7 +198,7 @@ Addition to SPEC §3.3 — the progress log (internal, gitignored):
   `sxl gold verify` across several sessions — which is precisely why Scope 4
   requires resumability.
 - **If `teacher_field_agreement` for any field comes back below ~0.75**, stop.
-  That field's teacher prompt is ambiguous, and 5,000 training rows are being
+  That field's teacher prompt is ambiguous, and the 4,500 training rows are being
   poisoned by it. Fix `prompts.py`, re-run F2 for that field's sake, and re-verify.
   This is cheaper than discovering it in F8.
 

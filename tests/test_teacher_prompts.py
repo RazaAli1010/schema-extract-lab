@@ -61,6 +61,22 @@ def test_system_prompt_forbids_inference_from_world_knowledge():
     assert "market estimate" in lowered
 
 
+def test_system_prompt_defends_posting_date_against_confabulation():
+    """F4 measured posting_date at precision 0.039 / recall 1.000 on the gold set.
+
+    The teacher emitted one invented date (2023-10-01) on 257 of 330 documents.
+    Recall was already perfect, so the only fix is a default-to-null instruction;
+    if these clauses are ever dropped from the prompt the failure returns silently
+    and F6 trains the student to confabulate.
+    """
+    lowered = SYSTEM_TEACHER.lower()
+    assert "posting_date: null" in lowered
+    assert "today's date" in lowered  # the specific wrong answer it reached for
+    assert "null is the expected answer" in lowered
+    assert "posted 3 days ago" in lowered  # relative phrases are not dates
+    assert "posting_date is not an enum" in lowered  # the 5 rows that emitted "unknown"
+
+
 def test_system_prompt_forbids_prose_and_code_fences():
     assert "no markdown code fences" in SYSTEM_TEACHER.lower()
 

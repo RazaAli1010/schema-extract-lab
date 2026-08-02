@@ -1,9 +1,25 @@
 ## F2 — Teacher labeling pipeline (batched, cached, spend-capped)
 
-**Goal:** `sxl teacher label` turns `docs.jsonl` into `train.jsonl` (5,000),
-`dev.jsonl` (300), and `eval_pool.jsonl` (361) of schema-valid `gold` labels
-produced by `gpt-4o-mini`, for well under $25, resumable after a crash, and
-without ever paying twice for the same document.
+**Goal:** `sxl teacher label` turns `docs.jsonl` into `train.jsonl` (4,500 —
+see "Delivered" below), `dev.jsonl` (300), and `eval_pool.jsonl` (361) of
+schema-valid `gold` labels produced by `gpt-4o-mini`, for well under $25,
+resumable after a crash, and without ever paying twice for the same document.
+
+**Delivered (2026-08-02).** `train.jsonl` holds **4,500 rows, not 5,000**. One
+500-document batch repeatedly bounced off the org's 2M enqueued-token limit and
+was cancelled rather than waited out; those 500 were then dropped by decision,
+not by failure. They are `select_docs` indices **3500–3999** — a contiguous
+chunk in sorted-`doc_id` order, so `train.jsonl` is indices 0–3499 + 4000–4999.
+
+`N_TRAIN_TARGET` stays **5000** deliberately. It is the *selection* cap that
+defines which documents are in scope; lowering it to 4500 would select the first
+4,500 by sorted `doc_id`, which is a *different* set — it would orphan 500 labels
+already paid for and re-request 500 that were dropped. The delivered set is
+defined by the file, not by the constant.
+
+Consequence to know: re-running `sxl teacher label --split train` will re-request
+those 500 (~$0.12). That is the only way to get back to 5,000, and it is a
+deliberate act, not something a routine re-run should do by accident.
 
 **Depends on:** F0 (`schema.py`, `config.py`, `io.py`, `splits.py`), F1 (`docs.jsonl`)
 
@@ -60,7 +76,8 @@ N_TRAIN_TARGET, N_DEV_TARGET = 5000, 300
 ```
 
 **Budget, measured.** The real selection is **5,661 documents** (train 5,000 of
-6,752 available + dev 300 of 387 + eval_pool 361 uncapped). `sxl teacher label
+6,752 available + dev 300 of 387 + eval_pool 361 uncapped); 5,161 were actually
+labeled, the other 500 being the dropped chunk above. `sxl teacher label
 --split all --dry-run` projects **13.25M input + 1.98M output tokens ≈ $1.59** at
 `gpt-4o-mini` Batch rates ($0.075/$0.30 per M — half the $0.15/$0.60 standard
 rates). Input runs ~2.3k tokens/doc rather than the ~1.2k first estimated, because
