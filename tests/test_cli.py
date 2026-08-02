@@ -14,8 +14,6 @@ runner = CliRunner()
 # command -> the feature that owns it (SPEC §8). A feature deletes its entry when it
 # lands and replaces it with a `--help`-only test below.
 UNIMPLEMENTED = {
-    ("gold", "sample"): "F3",
-    ("gold", "verify"): "F3",
     ("metrics", "score"): "F4",
     ("gpu", "predict"): "F5",
     ("gpu", "train"): "F6",
@@ -60,6 +58,19 @@ def test_teacher_label_is_implemented_and_exposes_its_options():
     result = runner.invoke(app, ["teacher", "label", "--help"])
     assert result.exit_code == 0
     for option in ("--split", "--limit", "--resume", "--model", "--dry-run"):
+        assert option in result.output
+
+
+def test_gold_commands_are_implemented_and_expose_their_options():
+    """F3 owns `gold sample|verify|finalize`; none may exit 2 any more."""
+    result = runner.invoke(app, ["gold", "--help"])
+    assert result.exit_code == 0
+    for command in ("sample", "verify", "finalize"):
+        assert command in result.output
+
+    result = runner.invoke(app, ["gold", "sample", "--help"])
+    assert result.exit_code == 0
+    for option in ("--n", "--seed", "--force"):
         assert option in result.output
 
 

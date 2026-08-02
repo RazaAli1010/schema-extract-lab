@@ -24,7 +24,9 @@ from sxl.config import (
     DOCS_PATH,
     MAX_TEACHER_SPEND_USD,
     METRICS_DIR,
+    N_GOLD_CANDIDATES,
     PREDICTIONS_DIR,
+    SEED,
     TEACHER_MODEL,
     TEACHER_PRICE_USD,
     ensure_dirs,
@@ -226,15 +228,93 @@ def teacher_label(
 
 # --- F3 ----------------------------------------------------------------------
 @gold_app.command("sample")
-def gold_sample() -> None:
-    """Sample eval-gold candidates from eval_pool."""
-    _not_yet("gold sample", "F3")
+def gold_sample(
+    n: Annotated[int, typer.Option("--n", help="candidates to draw")] = N_GOLD_CANDIDATES,
+    seed: Annotated[int, typer.Option("--seed", help="sampling seed")] = SEED,
+    force: Annotated[
+        bool, typer.Option("--force/--no-force", help="overwrite existing candidates")
+    ] = False,
+) -> None:
+    """Sample eval-gold candidates from eval_pool, stratified by document length."""
+    from sxl.verify import GoldError, GoldPaths, sample_candidates, stratum_of
+
+    ensure_dirs()
+    paths = GoldPaths.default()
+
+    # Resampling after review has started would discard human work, so this is
+    # opt-in and loud rather than idempotent-by-overwrite.
+    if paths.candidates.exists() and not force:
+        typer.secho(
+            f"{paths.candidates} already exists; --force to resample "
+            "(this discards any review progress against the current candidates)",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        picked = sample_candidates(n=n, seed=seed, paths=paths)
+    except GoldError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    bins: dict[str, int] = {}
+    for row in picked:
+        label = stratum_of(len(row["text"]))
+        bins[label] = bins.get(label, 0) + 1
+    typer.echo(f"wrote {paths.candidates} ({len(picked)} rows)")
+    typer.echo(json.dumps({"n": len(picked), "seed": seed, "char_len_bins": bins}, sort_keys=True))
 
 
 @gold_app.command("verify")
 def gold_verify() -> None:
-    """Hand-verify sampled candidates into data/gold/eval_gold.jsonl."""
-    _not_yet("gold verify", "F3")
+    """Hand-verify sampled candidates. Resumable — re-run to continue."""
+    from sxl.verify import GoldError, GoldPaths, review
+
+    ensure_dirs()
+    paths = GoldPaths.default()
+    try:
+        summary = review(paths=paths)
+    except GoldError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"wrote {paths.progress}")
+    typer.echo(json.dumps(summary, sort_keys=True))
+    if summary["n_reviewed"] >= summary["n_candidates"]:
+        typer.echo("all candidates reviewed — run `sxl gold finalize`")
+
+
+@gold_app.command("finalize")
+def gold_finalize() -> None:
+    """Replay the review log into data/gold/eval_gold.jsonl and gold_stats.json."""
+    from sxl.verify import GoldError, GoldPaths, agreement_warnings, finalize
+
+    ensure_dirs()
+    paths = GoldPaths.default()
+    try:
+        stats = finalize(paths=paths)
+    except GoldError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"wrote {paths.gold} ({stats['n_final']} rows)")
+    typer.echo(f"wrote {paths.stats}")
+    typer.echo(
+        json.dumps(
+            {k: stats[k] for k in ("n_candidates", "n_rejected", "n_final", "n_docs_edited")},
+            sort_keys=True,
+        )
+    )
+
+    worst = sorted(stats["teacher_field_agreement"].items(), key=lambda kv: kv[1])[:5]
+    typer.echo("lowest teacher agreement: " + "  ".join(f"{k}={v:.2f}" for k, v in worst))
+
+    problems = agreement_warnings(stats["teacher_field_agreement"])
+    if problems:
+        for problem in problems:
+            typer.secho(problem, fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
 
 
 # --- F4 ----------------------------------------------------------------------

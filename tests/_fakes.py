@@ -76,6 +76,75 @@ def gold_json(**over: Any) -> str:
     return json.dumps(gold(**over))
 
 
+# --- F3 gold-set fixtures -----------------------------------------------------
+
+
+def labeled_row(doc: dict[str, Any], **over: Any) -> dict[str, Any]:
+    """One `eval_pool.jsonl` row in `teacher.ROW_KEYS` shape.
+
+    `over` patches the 16-field `gold` object, not the envelope, because that is
+    what every F3 test actually varies.
+    """
+    return {
+        "doc_id": doc["doc_id"],
+        "domain": doc["domain"],
+        "text": doc["text"],
+        "gold": gold(**over),
+        "label_source": "teacher",
+        "teacher_model": "gpt-4o-mini",
+        "verified_by_human": False,
+        "verified_at": None,
+    }
+
+
+def eval_pool_rows(n: int, *, text: str | None = None) -> list[dict[str, Any]]:
+    """`n` labeled rows whose `doc_id`s really hash into the `eval_pool` bucket.
+
+    Built through the real `make_doc_id`/`split_for` pair rather than by faking
+    ids, so `sample_candidates` sees production-shaped data and the "every sampled
+    id is in eval_pool" assertion means something.
+    """
+    rows: list[dict[str, Any]] = []
+    i = 0
+    while len(rows) < n:
+        d = doc(i, text=text)
+        if split_for(d["doc_id"]) == "eval_pool":
+            rows.append(labeled_row(d))
+        i += 1
+        if i > 500_000:  # every loop has a cap (SPEC §5.4)
+            raise RuntimeError(f"could not find {n} eval_pool documents")
+    return sorted(rows, key=lambda r: r["doc_id"])
+
+
+def write_pool(paths: Any, rows: list[dict[str, Any]]) -> None:
+    from sxl.io import write_jsonl
+
+    write_jsonl(paths.eval_pool, rows)
+
+
+def write_candidates(paths: Any, rows: list[dict[str, Any]]) -> None:
+    from sxl.io import write_jsonl
+
+    write_jsonl(paths.candidates, sorted(rows, key=lambda r: r["doc_id"]))
+
+
+def scripted(answers: list[str]) -> Any:
+    """A `read_line` that replays `answers`, then behaves like a closed terminal.
+
+    Running out of input raises `KeyboardInterrupt`, which `review` treats as
+    save-and-quit — so a test script that ends mid-session exercises exactly the
+    crash path resumability is supposed to survive.
+    """
+    queue = list(answers)
+
+    def read_line(_prompt: str = "") -> str:
+        if not queue:
+            raise KeyboardInterrupt
+        return queue.pop(0)
+
+    return read_line
+
+
 # --- batch result lines -------------------------------------------------------
 
 

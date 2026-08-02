@@ -107,6 +107,23 @@ TEACHER_QUALITY_MIN_N = 200
 # >half the corpus with `required_skills: []` is a broken prompt, not a quiet corpus.
 TEACHER_MAX_SKILLS_EMPTY_SHARE = 0.5
 
+# --- gold eval set (F3) ------------------------------------------------------
+# Both `_`-prefixed files live under DATA, so `data/**` in .gitignore covers them
+# with no new rule -- same reasoning as TEACHER_CACHE_PATH. gold_stats.json is
+# under RESULTS and IS committed: F8 quotes `teacher_field_agreement` from it.
+GOLD_CANDIDATES_PATH = DATA / "gold" / "_candidates.jsonl"  # sampled, pre-verification
+GOLD_PROGRESS_PATH = DATA / "gold" / "_progress.jsonl"  # append-only edit log
+GOLD_STATS_PATH = RESULTS / "gold_stats.json"
+
+# char_len bin edges for stratified sampling. An unstratified sample
+# under-represents long postings, which is exactly where extraction fails -- a
+# gold set of short easy documents would inflate every arm equally and hide the
+# variance the project exists to measure.
+GOLD_STRATA_BINS = (400, 1500, 3000, 8000, 40000)
+N_GOLD_CANDIDATES = 330  # N_EVAL_GOLD + 10% slack for documents rejected as unusable
+GOLD_PROGRESS_EVERY = 25  # documents between progress reports during review
+GOLD_MAX_YEARS = 40  # above this, years_experience_min is flagged `low` for review
+
 # --- student / benchmark (SPEC §6.5) -----------------------------------------
 BASE_MODEL = "Qwen/Qwen3-1.7B"
 T4_HOURLY_USD = 0.35  # ~GCP on-demand T4; source recorded in results/bench/*
