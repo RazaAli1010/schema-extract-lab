@@ -1,0 +1,87 @@
+{
+  "enum_distribution": {
+    "education_level": {
+      "associate": 25,
+      "bachelor": 130,
+      "doctorate": 5,
+      "high_school": 51,
+      "master": 5,
+      "none": 11,
+      "unknown": 134
+    },
+    "employment_type": {
+      "contract": 46,
+      "full_time": 285,
+      "internship": 7,
+      "part_time": 15,
+      "temporary": 3,
+      "unknown": 5
+    },
+    "remote_mode": {
+      "hybrid": 43,
+      "onsite": 169,
+      "remote": 34,
+      "unknown": 115
+    },
+    "salary_period": {
+      "daily": 1,
+      "hourly": 43,
+      "monthly": 0,
+      "unknown": 231,
+      "weekly": 13,
+      "yearly": 73
+    },
+    "seniority": {
+      "intern": 8,
+      "junior": 35,
+      "lead": 24,
+      "mid": 202,
+      "principal": 0,
+      "senior": 39,
+      "unknown": 53
+    }
+  },
+  "field_null_rate": {
+    "company": 0.1524,
+    "education_level": 0.3712,
+    "employment_type": 0.0139,
+    "location_city": 0.5291,
+    "location_country": 0.097,
+    "location_region": 0.5651,
+    "posting_date": 0.1247,
+    "remote_mode": 0.3186,
+    "required_skills": 0.169,
+    "salary_currency": 0.6482,
+    "salary_max": 0.651,
+    "salary_min": 0.6482,
+    "salary_period": 0.6399,
+    "seniority": 0.1468,
+    "title": 0.0139,
+    "years_experience_min": 0.2632
+  },
+  "generated_at": "2026-08-02T05:22:05Z",
+  "git_sha": "5d80693",
+  "limit": 0,
+  "n_api_error": 0,
+  "n_batches": 1,
+  "n_cached": 20,
+  "n_new_requests": 341,
+  "n_ok": 361,
+  "n_parse_failed": 0,
+  "n_requested": 361,
+  "n_schema_invalid": 0,
+  "prompt_sha": "944bd674b0bc38a3",
+  "prompt_version": "v1",
+  "quality_warnings": [],
+  "spend_usd": 0.077895,
+  "spend_usd_cached": 0.004417,
+  "split": "eval_pool",
+  "split_counts": {
+    "eval_pool": 361
+  },
+  "teacher_model": "gpt-4o-mini",
+  "tokens": {
+    "input": 888922,
+    "output": 37418
+  }
+}
