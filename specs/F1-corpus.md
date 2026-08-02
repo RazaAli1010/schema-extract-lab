@@ -27,8 +27,10 @@ parquet files. Streaming and early column-projection are mandatory, not optional
 (credentialed access).
 
 **Sizing (SPEC §3.4):** train ≈ 5000, dev = 300, eval_gold = 300 — the last
-sampled by F3 as **330 candidates** drawn from the 5% `eval_pool`. Split
-assignment is by `sha256(doc_id) % 100` → 5/5/90. The binding constraint is the
+sampled by F3 as **330 candidates** drawn from the 5% `eval_pool`. (F2 delivered
+4,500 labeled `train` rows, not 5,000; see F2 "Delivered". The corpus-capacity
+floors below are unaffected — they count available documents, not labeled ones.)
+Split assignment is by `sha256(doc_id) % 100` → 5/5/90. The binding constraint is the
 5% `eval_pool` bucket, which must yield **≥ 340** documents: that needs a corpus
 of **≥ 7,000**. Target **7,500** for headroom and treat anything below 7,000 as a
 build failure.
