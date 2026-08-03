@@ -403,7 +403,9 @@ schema-extract-lab/
 │   ├── splits.py                # §3.4 hashing
 │   ├── verify.py                # F3 human-verification TUI
 │   ├── metrics.py               # §3.5
-│   ├── prompts.py               # §3.6 constants + builders
+│   ├── prompts.py               # §3.6 constants + builders; F2's teacher prompt
+│   │                            # and F5's build_student_prompt / pick_fewshot /
+│   │                            # FEWSHOT_IDS live here side by side
 │   ├── report.py                # F8
 │   ├── cli.py                   # typer app, single entrypoint
 │   └── gpu/                     # TORCH-ONLY. never imported on the laptop.
@@ -542,6 +544,14 @@ CORPUS_PEEK_ROWS  = 20       # rows sampled to auto-detect the text column
 CORPUS_MIN_FREE_BYTES = 2 * 1024**3
 CORPUS_MIN_SPLIT_N = 340     # required in both `dev` and `eval_pool`
 HF_CACHE_DIR = DATA / ".hfcache"   # deleted after a successful build
+```
+
+**Inference constants** (`config.py`, applied from the F5 context deltas):
+
+```python
+GEN_BATCH_SIZE = 8           # inference batch for the F5/F6 prediction runs
+KAGGLE_TMP     = Path("/kaggle/tmp")      # ~60 GB scratch, NOT persisted
+KAGGLE_WORKING = Path("/kaggle/working")  # 20 GB, persisted as notebook output
 ```
 
 `HF_HOME`/`HF_HUB_CACHE` are redirected to `HF_CACHE_DIR` **before** `datasets`

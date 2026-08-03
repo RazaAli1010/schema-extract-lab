@@ -129,6 +129,18 @@ GOLD_MAX_YEARS = 40  # above this, years_experience_min is flagged `low` for rev
 BASE_MODEL = "Qwen/Qwen3-1.7B"
 T4_HOURLY_USD = 0.35  # ~GCP on-demand T4; source recorded in results/bench/*
 
+# Inference batch for the F5/F6 prediction runs. 1.7B fp16 is ~3.4 GB of weights;
+# 8 sequences at ~1.5k prompt tokens leaves plenty of the T4's 16 GB for the KV
+# cache. Halve it on OOM -- never drop to 4-bit, because the baseline and the
+# fine-tuned arm must share a precision for the comparison to mean anything.
+GEN_BATCH_SIZE = 8
+
+# Kaggle volumes (SPEC §2.2). `/kaggle/working` is 20 GB and persisted as the
+# notebook's output; `/kaggle/tmp` is ~60 GB of scratch that is not. Model
+# weights and the HF cache go to tmp, small JSONL results to working.
+KAGGLE_TMP = Path("/kaggle/tmp")
+KAGGLE_WORKING = Path("/kaggle/working")
+
 _DIRS = (
     DATA,
     DOCS_PATH.parent,
