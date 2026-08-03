@@ -17,6 +17,7 @@ import typer
 
 from sxl.config import (
     ARMS,
+    BASE_MODEL,
     CORPUS_MIN_N,
     CORPUS_MIN_SPLIT_N,
     CORPUS_SOURCES,
@@ -24,6 +25,7 @@ from sxl.config import (
     CORPUS_TARGET_N,
     DOCS_PATH,
     EVAL_GOLD_PATH,
+    GEN_BATCH_SIZE,
     MAX_TEACHER_SPEND_USD,
     METRICS_DIR,
     N_EVAL_GOLD,
@@ -31,6 +33,7 @@ from sxl.config import (
     SEED,
     TEACHER_MODEL,
     TEACHER_PRICE_USD,
+    TRAIN_PATH,
     ensure_dirs,
 )
 
@@ -460,10 +463,128 @@ def metrics_compare(
 
 # --- F5/F6/F7 — Kaggle only. Imports go INSIDE the bodies. -------------------
 @gpu_app.command("predict")
-def gpu_predict(arm: ArmOpt = "") -> None:
-    """Run an inference arm on a GPU (Kaggle)."""
-    # F5 puts its `from sxl.gpu import runner` here, inside the body.
-    _not_yet("gpu predict", "F5")
+def gpu_predict(
+    arm: ArmOpt = "",
+    gold: Annotated[
+        Path | None,
+        typer.Option("--gold", help=f"documents to predict [default: {EVAL_GOLD_PATH}]"),
+    ] = None,
+    train: Annotated[
+        Path | None,
+        typer.Option("--train", help=f"source of the few-shot exemplars [default: {TRAIN_PATH}]"),
+    ] = None,
+    model: Annotated[str, typer.Option("--model", help="HF model id")] = BASE_MODEL,
+    adapter: Annotated[
+        str, typer.Option("--adapter", help="LoRA adapter id or path (F6's lora_ft arms)")
+    ] = "",
+    batch_size: Annotated[
+        int, typer.Option("--batch-size", help="prompts per generate() call")
+    ] = GEN_BATCH_SIZE,
+    limit: Annotated[int, typer.Option("--limit", help="cap documents; 0 = all")] = 0,
+    out: Annotated[
+        Path | None,
+        typer.Option("--out", help="output JSONL [default: artifacts/predictions/<arm>.jsonl]"),
+    ] = None,
+) -> None:
+    """Run an inference arm on a GPU (Kaggle).
+
+    Resumable: a killed run leaves `<out>.partial.jsonl` behind and re-invoking
+    picks up where it stopped without regenerating completed documents.
+    """
+    # Kaggle only. These imports pull torch, so they stay inside the body —
+    # `sxl --help` must work on the laptop (SPEC §2.1).
+    from sxl.gpu.runner import PredictPaths, RunnerError, fewshot_prompt_fn, predict_arm
+    from sxl.io import read_jsonl
+    from sxl.prompts import STUDENT_PROMPT_SHA, pick_fewshot
+
+    # Exit 1, not typer's usual 2: in this repo exit 2 means "not implemented" and
+    # must stay unambiguous (see `_not_yet`).
+    if arm not in ARMS:
+        typer.secho(
+            f"unknown --arm {arm!r}; expected one of {' | '.join(ARMS)}",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if arm == "teacher":
+        typer.secho(
+            "the `teacher` arm is a hosted API call produced by `sxl teacher label` (F2), "
+            "not a GPU run",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    gold_path = gold if gold is not None else EVAL_GOLD_PATH
+    train_path = train if train is not None else TRAIN_PATH
+    # Not `ensure_dirs()`: on Kaggle the package is a pip install and `config.ROOT`
+    # resolves into site-packages, so creating the whole repo tree would be wrong.
+    out_path = out if out is not None else PredictPaths.default().pred_for(arm)
+
+    for label, path in (("--gold", gold_path), ("--train", train_path)):
+        if not path.exists():
+            typer.secho(
+                f"{label} {path} does not exist. On Kaggle, pass the mounted dataset paths "
+                "explicitly (e.g. /kaggle/input/sxl-data/eval_gold.jsonl).",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    gold_rows = list(read_jsonl(gold_path))
+    if limit:
+        gold_rows = gold_rows[:limit]
+    if not gold_rows:
+        typer.secho(f"{gold_path} has no rows", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    try:
+        shots = pick_fewshot(read_jsonl(train_path))
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(
+        f"[predict] arm={arm} model={model} adapter={adapter or '-'} "
+        f"prompt_sha={STUDENT_PROMPT_SHA} n={len(gold_rows)} batch={batch_size}"
+    )
+    typer.echo(f"[predict] shots={[s['doc_id'] for s in shots]} from {train_path}")
+
+    from sxl.gpu.runner import load_model, make_generate_fn
+
+    hf_model, tok = load_model(model, adapter=adapter or None)
+    if arm.endswith("_constrained"):
+        from sxl.gpu.constrained import build_constrained_generator
+
+        generate_fn = build_constrained_generator(hf_model, tok)
+    else:
+        generate_fn = make_generate_fn(hf_model, tok)
+
+    try:
+        summary = predict_arm(
+            arm,
+            gold_rows,
+            generate_fn,
+            out_path,
+            prompt_fn=fewshot_prompt_fn(shots),
+            batch_size=batch_size,
+        )
+    except RunnerError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"wrote {out_path} ({summary['n']} rows)")
+    typer.echo(json.dumps(summary | {"prompt_sha": STUDENT_PROMPT_SHA}, sort_keys=True))
+
+    # A high truncation rate is a real cost of constrained decoding, not a
+    # footnote: a grammar cannot end `required_skills` early. F8 reports it.
+    if summary["n"] and summary["n_truncated"] / summary["n"] > 0.05:
+        typer.secho(
+            f"{summary['n_truncated']}/{summary['n']} completions hit max_new_tokens "
+            "(>5%) — record this in the run log; F8 must report it.",
+            fg=typer.colors.YELLOW,
+            err=True,
+        )
 
 
 @gpu_app.command("train")
