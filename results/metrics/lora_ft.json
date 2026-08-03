@@ -1,0 +1,125 @@
+{
+  "arm": "lora_ft",
+  "split": "eval_gold",
+  "n": 300,
+  "schema_valid_rate": 0.99,
+  "macro_f1": 0.884,
+  "macro_f1_null_baseline": 0.0,
+  "n_missing_predictions": 0,
+  "per_field": {
+    "title": {
+      "em": 0.8333,
+      "precision": 0.8396,
+      "recall": 0.8367,
+      "f1": 0.8382,
+      "support": 294
+    },
+    "company": {
+      "em": 0.8933,
+      "precision": 0.8958,
+      "recall": 0.9034,
+      "f1": 0.8996,
+      "support": 238
+    },
+    "employment_type": {
+      "em": 0.9667,
+      "precision": 0.9761,
+      "recall": 0.9695,
+      "f1": 0.9728,
+      "support": 295
+    },
+    "seniority": {
+      "em": 0.8067,
+      "precision": 0.8431,
+      "recall": 0.8113,
+      "f1": 0.8269,
+      "support": 265
+    },
+    "remote_mode": {
+      "em": 0.8533,
+      "precision": 0.8829,
+      "recall": 0.8916,
+      "f1": 0.8873,
+      "support": 203
+    },
+    "location_city": {
+      "em": 0.92,
+      "precision": 0.8881,
+      "recall": 0.8881,
+      "f1": 0.8881,
+      "support": 143
+    },
+    "location_region": {
+      "em": 0.8333,
+      "precision": 0.7642,
+      "recall": 0.7287,
+      "f1": 0.746,
+      "support": 129
+    },
+    "location_country": {
+      "em": 0.9367,
+      "precision": 0.9807,
+      "recall": 0.9478,
+      "f1": 0.9639,
+      "support": 268
+    },
+    "salary_min": {
+      "em": 0.9633,
+      "precision": 0.949,
+      "recall": 0.9208,
+      "f1": 0.9347,
+      "support": 101
+    },
+    "salary_max": {
+      "em": 0.9667,
+      "precision": 0.9592,
+      "recall": 0.9307,
+      "f1": 0.9447,
+      "support": 101
+    },
+    "salary_currency": {
+      "em": 0.98,
+      "precision": 1.0,
+      "recall": 0.9608,
+      "f1": 0.98,
+      "support": 102
+    },
+    "salary_period": {
+      "em": 0.9767,
+      "precision": 0.99,
+      "recall": 0.9519,
+      "f1": 0.9706,
+      "support": 104
+    },
+    "years_experience_min": {
+      "em": 0.9133,
+      "precision": 0.9442,
+      "recall": 0.9022,
+      "f1": 0.9227,
+      "support": 225
+    },
+    "education_level": {
+      "em": 0.9133,
+      "precision": 0.9162,
+      "recall": 0.9061,
+      "f1": 0.9111,
+      "support": 181
+    },
+    "required_skills": {
+      "em": 0.15,
+      "precision": 0.5823,
+      "recall": 0.5939,
+      "f1": 0.588,
+      "support": 1549
+    },
+    "posting_date": {
+      "em": 0.98,
+      "precision": 0.7692,
+      "recall": 1.0,
+      "f1": 0.8696,
+      "support": 10
+    }
+  },
+  "generated_at": "2026-08-03T21:08:29Z",
+  "git_sha": "3ad4baf"
+}
