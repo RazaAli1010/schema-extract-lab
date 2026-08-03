@@ -16,15 +16,20 @@ from typing import Annotated
 import typer
 
 from sxl.config import (
+    ADAPTER_DIR,
     ARMS,
     BASE_MODEL,
+    CHECKPOINT_DIR,
+    CHECKPOINT_MIRROR_DIR,
     CORPUS_MIN_N,
     CORPUS_MIN_SPLIT_N,
     CORPUS_SOURCES,
     CORPUS_STATS_PATH,
     CORPUS_TARGET_N,
+    DEV_PATH,
     DOCS_PATH,
     EVAL_GOLD_PATH,
+    FT_ARMS,
     GEN_BATCH_SIZE,
     MAX_TEACHER_SPEND_USD,
     METRICS_DIR,
@@ -33,7 +38,13 @@ from sxl.config import (
     SEED,
     TEACHER_MODEL,
     TEACHER_PRICE_USD,
+    TRAIN_BATCH_SIZE,
+    TRAIN_EPOCHS,
+    TRAIN_GRAD_ACCUM,
+    TRAIN_LR,
+    TRAIN_MAX_LENGTH,
     TRAIN_PATH,
+    TRAIN_STATS_PATH,
     ensure_dirs,
 )
 
@@ -50,6 +61,21 @@ _TEACHER_SUMMARY_KEYS = (
     "n_api_error",
     "spend_usd",
     "spend_usd_cached",
+)
+
+#: Echoed as one JSON line at the end of a real `gpu train` run. The full stats
+#: object goes to `results/train_stats.json`; this is the at-a-glance subset a
+#: Kaggle notebook cell shows without opening the file.
+_TRAIN_SUMMARY_KEYS = (
+    "n_train",
+    "n_dev",
+    "n_steps",
+    "trainable_pct",
+    "final_train_loss",
+    "best_eval_loss",
+    "peak_vram_gb",
+    "train_runtime_s",
+    "token_p95",
 )
 
 #: F2 acceptance criteria. Only checked on a full (`--limit 0`) run of that split.
@@ -521,7 +547,13 @@ def gpu_predict(
     # resolves into site-packages, so creating the whole repo tree would be wrong.
     out_path = out if out is not None else PredictPaths.default().pred_for(arm)
 
-    for label, path in (("--gold", gold_path), ("--train", train_path)):
+    # The fine-tuned arms carry the schema in the weights, not the prompt (SPEC
+    # §3.6), so they have no exemplars and therefore need no --train file at all.
+    is_ft = arm in FT_ARMS
+    required = (
+        [("--gold", gold_path)] if is_ft else [("--gold", gold_path), ("--train", train_path)]
+    )
+    for label, path in required:
         if not path.exists():
             typer.secho(
                 f"{label} {path} does not exist. On Kaggle, pass the mounted dataset paths "
@@ -538,17 +570,34 @@ def gpu_predict(
         typer.secho(f"{gold_path} has no rows", fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1)
 
-    try:
-        shots = pick_fewshot(read_jsonl(train_path))
-    except ValueError as exc:
-        typer.secho(str(exc), fg=typer.colors.RED, err=True)
-        raise typer.Exit(code=1) from exc
+    if is_ft:
+        from sxl.prompts import FT_PROMPT_SHA, build_ft_prompt
+
+        if not adapter:
+            typer.secho(
+                f"--arm {arm} needs --adapter. Without one this would measure the BASE model "
+                "under the fine-tuned prompt, which is not an arm in SPEC §3.6 -- and it would "
+                "score badly for a reason that has nothing to do with fine-tuning.",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+        # `build_ft_prompt` is already a `PromptFn`, so it goes straight through.
+        shots, prompt_fn, prompt_sha = [], build_ft_prompt, FT_PROMPT_SHA
+    else:
+        try:
+            shots = pick_fewshot(read_jsonl(train_path))
+        except ValueError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        prompt_fn, prompt_sha = fewshot_prompt_fn(shots), STUDENT_PROMPT_SHA
 
     typer.echo(
         f"[predict] arm={arm} model={model} adapter={adapter or '-'} "
-        f"prompt_sha={STUDENT_PROMPT_SHA} n={len(gold_rows)} batch={batch_size}"
+        f"prompt_sha={prompt_sha} n={len(gold_rows)} batch={batch_size}"
     )
-    typer.echo(f"[predict] shots={[s['doc_id'] for s in shots]} from {train_path}")
+    if shots:
+        typer.echo(f"[predict] shots={[s['doc_id'] for s in shots]} from {train_path}")
 
     from sxl.gpu.runner import load_model, make_generate_fn
 
@@ -566,7 +615,7 @@ def gpu_predict(
             gold_rows,
             generate_fn,
             out_path,
-            prompt_fn=fewshot_prompt_fn(shots),
+            prompt_fn=prompt_fn,
             batch_size=batch_size,
         )
     except RunnerError as exc:
@@ -574,7 +623,7 @@ def gpu_predict(
         raise typer.Exit(code=1) from exc
 
     typer.echo(f"wrote {out_path} ({summary['n']} rows)")
-    typer.echo(json.dumps(summary | {"prompt_sha": STUDENT_PROMPT_SHA}, sort_keys=True))
+    typer.echo(json.dumps(summary | {"prompt_sha": prompt_sha}, sort_keys=True))
 
     # A high truncation rate is a real cost of constrained decoding, not a
     # footnote: a grammar cannot end `required_skills` early. F8 reports it.
@@ -588,10 +637,109 @@ def gpu_predict(
 
 
 @gpu_app.command("train")
-def gpu_train() -> None:
-    """LoRA fine-tune the student model (Kaggle)."""
-    # F6 puts its `from sxl.gpu import train_lora` here, inside the body.
-    _not_yet("gpu train", "F6")
+def gpu_train(
+    train: Annotated[
+        Path | None, typer.Option("--train", help=f"training rows [default: {TRAIN_PATH}]")
+    ] = None,
+    dev: Annotated[
+        Path | None, typer.Option("--dev", help=f"eval rows [default: {DEV_PATH}]")
+    ] = None,
+    gold: Annotated[
+        Path | None,
+        typer.Option(
+            "--gold", help=f"eval_gold, for the leakage check [default: {EVAL_GOLD_PATH}]"
+        ),
+    ] = None,
+    model: Annotated[str, typer.Option("--model", help="base HF model id")] = BASE_MODEL,
+    out: Annotated[Path, typer.Option("--out", help="where the adapter is saved")] = ADAPTER_DIR,
+    stats_out: Annotated[
+        Path, typer.Option("--stats-out", help="train_stats.json")
+    ] = TRAIN_STATS_PATH,
+    checkpoint_dir: Annotated[
+        Path, typer.Option("--checkpoint-dir", help="live checkpoints (ephemeral on Kaggle)")
+    ] = CHECKPOINT_DIR,
+    # A str, not a Path: typer turns `--mirror-dir ""` into `Path(".")`, which is
+    # truthy, so a Path here would silently mirror checkpoints into the CWD instead
+    # of disabling the mirror.
+    mirror_dir: Annotated[
+        str, typer.Option("--mirror-dir", help="persisted checkpoint mirror; empty to disable")
+    ] = str(CHECKPOINT_MIRROR_DIR),
+    epochs: Annotated[int, typer.Option("--epochs")] = TRAIN_EPOCHS,
+    lr: Annotated[float, typer.Option("--lr")] = TRAIN_LR,
+    max_length: Annotated[
+        int, typer.Option("--max-length", help="raise to 3072 if the token p95 exceeds it")
+    ] = TRAIN_MAX_LENGTH,
+    batch_size: Annotated[int, typer.Option("--batch-size")] = TRAIN_BATCH_SIZE,
+    grad_accum: Annotated[int, typer.Option("--grad-accum")] = TRAIN_GRAD_ACCUM,
+    limit: Annotated[int, typer.Option("--limit", help="cap training rows; 0 = all")] = 0,
+    max_steps: Annotated[int, typer.Option("--max-steps", help="smoke runs; 0 = full")] = 0,
+    resume_from_checkpoint: Annotated[
+        str, typer.Option("--resume-from-checkpoint", help="'auto', a path, or empty")
+    ] = "",
+    load_in_4bit: Annotated[
+        bool,
+        typer.Option("--load-in-4bit/--no-load-in-4bit", help="the OOM fallback (SPEC §5.3)"),
+    ] = False,
+    push_to: Annotated[
+        str, typer.Option("--push-to", help="HF repo id; empty = do not publish")
+    ] = "",
+    seed: Annotated[int, typer.Option("--seed")] = SEED,
+) -> None:
+    """LoRA fine-tune the student model (Kaggle).
+
+    Resumable: `--resume-from-checkpoint auto` picks up the newest checkpoint,
+    falling back to the persisted mirror when `/kaggle/tmp` has been wiped by a
+    session ending.
+    """
+    train_path = train if train is not None else TRAIN_PATH
+    dev_path = dev if dev is not None else DEV_PATH
+    gold_path = gold if gold is not None else EVAL_GOLD_PATH
+
+    # Checked before the import below, which pulls torch: a typo'd Kaggle path
+    # should cost a second, not a model load.
+    for label, path in (("--train", train_path), ("--dev", dev_path), ("--gold", gold_path)):
+        if not path.exists():
+            typer.secho(
+                f"{label} {path} does not exist. On Kaggle, pass the mounted dataset paths "
+                "explicitly (e.g. /kaggle/input/sxl-data/train.jsonl).",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    from sxl.gpu.train_lora import TrainError
+    from sxl.gpu.train_lora import train as run_train
+
+    try:
+        stats = run_train(
+            train_path=train_path,
+            dev_path=dev_path,
+            gold_path=gold_path,
+            model_id=model,
+            output_dir=checkpoint_dir,
+            adapter_dir=out,
+            mirror_dir=Path(mirror_dir) if mirror_dir.strip() else None,
+            stats_path=stats_out,
+            epochs=epochs,
+            lr=lr,
+            max_length=max_length,
+            batch_size=batch_size,
+            grad_accum=grad_accum,
+            limit=limit,
+            max_steps=max_steps,
+            resume_from_checkpoint=resume_from_checkpoint,
+            load_in_4bit=load_in_4bit,
+            push_to=push_to,
+            seed=seed,
+            echo=typer.echo,
+        )
+    except TrainError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    typer.echo(f"wrote {out}")
+    typer.echo(f"wrote {stats_out}")
+    typer.echo(json.dumps({k: stats[k] for k in _TRAIN_SUMMARY_KEYS}, sort_keys=True))
 
 
 @gpu_app.command("bench")

@@ -14,7 +14,6 @@ runner = CliRunner()
 # command -> the feature that owns it (SPEC §8). A feature deletes its entry when it
 # lands and replaces it with a `--help`-only test below.
 UNIMPLEMENTED = {
-    ("gpu", "train"): "F6",
     ("gpu", "bench"): "F7",
     ("report", "build"): "F8",
 }
@@ -244,6 +243,210 @@ def test_gpu_predict_respects_limit(tmp_path, monkeypatch):
     )
     assert result.exit_code == 0, result.output
     assert len(out.read_text(encoding="utf-8").splitlines()) == 4
+
+
+def _ft_gold_file(tmp_path, n: int = 3):
+    from _fakes import doc, gold_row
+    from sxl.io import write_jsonl
+
+    path = tmp_path / "eval_gold.jsonl"
+    write_jsonl(path, [gold_row(doc(300 + i)) for i in range(n)])
+    return path
+
+
+def _fake_runner(monkeypatch, sink: list):
+    """Replace the two torch entry points of `gpu predict`. Returns nothing."""
+    import sxl.gpu.runner as runner_mod
+    from _fakes import gold_json
+
+    def fake_generate(batch):
+        sink.extend(batch)
+        return [
+            {
+                "raw_output": gold_json(title="Extracted"),
+                "prompt_tokens": 40,
+                "completion_tokens": 143,
+                "latency_ms": 12.0,
+            }
+            for _ in batch
+        ]
+
+    monkeypatch.setattr(runner_mod, "load_model", lambda *a, **k: ("model", "tok"))
+    monkeypatch.setattr(runner_mod, "make_generate_fn", lambda *a, **k: fake_generate)
+
+
+def test_gpu_predict_lora_ft_needs_no_train_file(tmp_path, monkeypatch):
+    """The fine-tuned arm has no exemplars, so it must not demand `--train`.
+
+    This is the CLI branch F6 adds, and the Kaggle notebook relies on it: the
+    prediction cells pass `--gold` and `--adapter` only.
+    """
+    seen: list = []
+    _fake_runner(monkeypatch, seen)
+    gold_path = _ft_gold_file(tmp_path)
+    out = tmp_path / "lora_ft.jsonl"
+
+    result = runner.invoke(
+        app,
+        [
+            "gpu",
+            "predict",
+            "--arm",
+            "lora_ft",
+            "--gold",
+            str(gold_path),
+            "--adapter",
+            "someone/qwen3-1.7b-jobpost-lora",
+            "--out",
+            str(out),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert len(out.read_text(encoding="utf-8").splitlines()) == 3
+
+
+def test_gpu_predict_lora_ft_uses_the_short_shot_free_prompt(tmp_path, monkeypatch):
+    """System + document, and nothing else. The cost claim depends on it."""
+    from sxl.prompts import FT_PROMPT_SHA, SCHEMA_BLOCK
+
+    seen: list = []
+    _fake_runner(monkeypatch, seen)
+
+    result = runner.invoke(
+        app,
+        [
+            "gpu",
+            "predict",
+            "--arm",
+            "lora_ft",
+            "--gold",
+            str(_ft_gold_file(tmp_path)),
+            "--adapter",
+            "someone/adapter",
+            "--out",
+            str(tmp_path / "lora_ft.jsonl"),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert [m["role"] for m in seen[0]] == ["system", "user"]
+    assert SCHEMA_BLOCK not in "".join(m["content"] for m in seen[0])
+    # The run log traces the file to the prompt that made it, as F5's does.
+    assert FT_PROMPT_SHA in result.output
+
+
+def test_gpu_predict_lora_ft_requires_an_adapter(tmp_path):
+    """Without one this would silently measure the base model under a bare prompt."""
+    result = runner.invoke(
+        app,
+        ["gpu", "predict", "--arm", "lora_ft", "--gold", str(_ft_gold_file(tmp_path))],
+    )
+    assert result.exit_code == 1
+    assert "--adapter" in result.output
+
+
+def test_gpu_train_is_implemented_and_exposes_its_options():
+    """F6 owns `gpu train`; it must no longer exit 2. Never invoked here — needs a GPU."""
+    result = runner.invoke(app, ["gpu", "train", "--help"])
+    assert result.exit_code == 0
+    for option in (
+        "--train",
+        "--dev",
+        "--gold",
+        "--epochs",
+        "--lr",
+        "--limit",
+        "--max-steps",
+        "--resume-from-checkpoint",
+        "--load-in-4bit",
+        "--out",
+        "--stats-out",
+        "--push-to",
+    ):
+        assert option in result.output
+
+
+def test_gpu_train_reports_a_missing_input_before_importing_torch(tmp_path):
+    result = runner.invoke(app, ["gpu", "train", "--train", str(tmp_path / "nope.jsonl")])
+    assert result.exit_code == 1
+    assert "does not exist" in result.output
+
+
+def test_gpu_train_wires_its_options_into_train(tmp_path, monkeypatch):
+    """Argument plumbing only — `train_lora.train` itself is Kaggle's problem."""
+    import sxl.gpu.train_lora as train_mod
+    from _fakes import train_row
+    from sxl.cli import _TRAIN_SUMMARY_KEYS
+    from sxl.io import write_jsonl
+
+    paths = {}
+    for name, rows in (
+        ("train", [train_row(i) for i in range(4)]),
+        ("dev", [train_row(i) for i in range(10, 12)]),
+        ("gold", [train_row(i) for i in range(20, 22)]),
+    ):
+        paths[name] = tmp_path / f"{name}.jsonl"
+        write_jsonl(paths[name], rows)
+
+    captured = {}
+
+    def fake_train(**kwargs):
+        captured.update(kwargs)
+        return dict.fromkeys(_TRAIN_SUMMARY_KEYS, 0)
+
+    monkeypatch.setattr(train_mod, "train", fake_train)
+
+    result = runner.invoke(
+        app,
+        [
+            "gpu",
+            "train",
+            "--train",
+            str(paths["train"]),
+            "--dev",
+            str(paths["dev"]),
+            "--gold",
+            str(paths["gold"]),
+            "--out",
+            str(tmp_path / "adapter"),
+            "--stats-out",
+            str(tmp_path / "train_stats.json"),
+            "--epochs",
+            "1",
+            "--limit",
+            "8",
+            "--max-steps",
+            "5",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["epochs"] == 1
+    assert captured["limit"] == 8
+    assert captured["max_steps"] == 5
+    assert captured["train_path"] == paths["train"]
+    assert captured["push_to"] == ""  # a stray run never pushes to the Hub
+    assert set(json.loads(result.output.strip().splitlines()[-1])) == set(_TRAIN_SUMMARY_KEYS)
+
+    # `--mirror-dir ""` must DISABLE the mirror. As a typer `Path` this arrived as
+    # `Path(".")`, which is truthy, and checkpoints would have landed in the CWD.
+    runner.invoke(
+        app,
+        [
+            "gpu",
+            "train",
+            "--train",
+            str(paths["train"]),
+            "--dev",
+            str(paths["dev"]),
+            "--gold",
+            str(paths["gold"]),
+            "--mirror-dir",
+            "",
+        ],
+    )
+    assert captured["mirror_dir"] is None
 
 
 def test_metrics_score_rejects_an_unknown_arm_with_exit_1():

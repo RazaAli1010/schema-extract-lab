@@ -16,7 +16,7 @@ import textwrap
 
 import pytest
 
-MODULES = ["sxl.gpu", "sxl.gpu.runner", "sxl.gpu.constrained"]
+MODULES = ["sxl.gpu", "sxl.gpu.runner", "sxl.gpu.constrained", "sxl.gpu.train_lora"]
 
 
 def run_snippet(code: str) -> subprocess.CompletedProcess:
@@ -37,6 +37,11 @@ def test_importing_a_gpu_module_does_not_import_torch(module):
         assert "transformers" not in sys.modules
         assert "peft" not in sys.modules
         assert "outlines" not in sys.modules
+        assert "trl" not in sys.modules
+        # `datasets` for a second reason beyond weight: huggingface_hub freezes
+        # its cache path into module constants at import time, so importing it
+        # before the notebook sets HF_HOME pins the cache to the wrong volume.
+        assert "datasets" not in sys.modules
     """)
     assert result.returncode == 0, result.stderr
 
@@ -64,5 +69,19 @@ def test_gpu_predict_help_works_without_torch():
         out = CliRunner().invoke(app, ["gpu", "predict", "--help"])
         assert out.exit_code == 0, out.output
         assert "torch" not in sys.modules
+    """)
+    assert result.returncode == 0, result.stderr
+
+
+def test_gpu_train_help_works_without_torch():
+    result = run_snippet("""
+        import sys
+        from typer.testing import CliRunner
+        from sxl.cli import app
+
+        out = CliRunner().invoke(app, ["gpu", "train", "--help"])
+        assert out.exit_code == 0, out.output
+        assert "torch" not in sys.modules
+        assert "trl" not in sys.modules
     """)
     assert result.returncode == 0, result.stderr

@@ -141,6 +141,57 @@ GEN_BATCH_SIZE = 8
 KAGGLE_TMP = Path("/kaggle/tmp")
 KAGGLE_WORKING = Path("/kaggle/working")
 
+# --- LoRA fine-tune (F6) -----------------------------------------------------
+# r=16 / alpha=32 on all seven attention+MLP projections is the standard "attach
+# everything" recipe. At 1.7B it lands near 1% trainable, which `train()` checks
+# before the first optimizer step: 100% means `peft_config` never attached and the
+# run is full-fine-tuning a 1.7B model on a T4.
+LORA_R, LORA_ALPHA, LORA_DROPOUT = 16, 32, 0.05
+LORA_TARGET_MODULES = (
+    "q_proj",
+    "k_proj",
+    "v_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+)
+TRAIN_MIN_TRAINABLE_PCT, TRAIN_MAX_TRAINABLE_PCT = 0.1, 5.0
+
+TRAIN_EPOCHS = 3
+TRAIN_LR = 2e-4  # LoRA wants ~10x a full fine-tune's LR
+TRAIN_MAX_LENGTH = 2048  # 6000 chars (~1.5k tokens) + a ~350-token JSON target
+TRAIN_BATCH_SIZE = 2
+TRAIN_GRAD_ACCUM = 8  # effective batch 16 -> ~844 steps over 4500 rows x 3 epochs
+TRAIN_WARMUP_RATIO = 0.03
+TRAIN_MAX_GRAD_NORM = 0.3  # fp16 stability on a T4 (SPEC §2.3), not a default
+TRAIN_LOGGING_STEPS = 10
+# Equal by requirement, not coincidence: `load_best_model_at_end` needs the save
+# and eval strategies to line up, and Trainer raises if they do not.
+TRAIN_EVAL_STEPS = TRAIN_SAVE_STEPS = 100
+TRAIN_SAVE_TOTAL_LIMIT = 2
+# Rows tokenized for the sequence-length p95 check. Tokenizing all 4500 spends
+# minutes of a scarce GPU session on a number a 500-row sample already settles.
+TRAIN_LEN_SAMPLE = 500
+
+# Checkpoints live in ephemeral /kaggle/tmp for the space and are mirrored into
+# persisted /kaggle/working on every save, because when the session dies
+# everything under /kaggle/tmp dies with it. The mirror is what
+# `--resume-from-checkpoint auto` finds in a fresh session.
+CHECKPOINT_DIR = KAGGLE_TMP / "ckpt"
+CHECKPOINT_MIRROR_DIR = KAGGLE_WORKING / "ckpt_latest"
+ADAPTER_DIR = KAGGLE_WORKING / "adapter"
+# Placeholder on purpose: `train_lora.publish` refuses to push to an id that
+# still contains "<". Set it here or pass `--push-to` before publishing.
+ADAPTER_REPO = "<hf_user>/qwen3-1.7b-jobpost-lora"
+TRAIN_STATS_PATH = RESULTS / "train_stats.json"
+
+# The arms whose prompt is the short, shot-free, schema-free one (SPEC §3.6).
+# `sxl gpu predict` branches on membership here rather than on a name prefix.
+FT_ARMS = ("lora_ft", "lora_ft_constrained")
+if set(FT_ARMS) - set(ARMS):  # pragma: no cover - structural guard
+    raise AssertionError(f"FT_ARMS is not a subset of ARMS: {FT_ARMS}")
+
 _DIRS = (
     DATA,
     DOCS_PATH.parent,

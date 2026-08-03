@@ -1,4 +1,4 @@
-"""Offline fixtures and a stub OpenAI client for the F2 tests.
+"""Offline fixtures, a stub OpenAI client, and a fake tokenizer for the tests.
 
 A plain importable module rather than a `conftest.py`, keeping the repo's "no
 conftest, no pytest fixtures — module-level constants and plain helpers"
@@ -409,3 +409,55 @@ def write_docs(paths: Any, docs: list[dict[str, Any]]) -> None:
     from sxl.io import write_jsonl
 
     write_jsonl(paths.docs, docs)
+
+
+# --- F6 fine-tune fixtures ----------------------------------------------------
+
+
+class FakeQwenTokenizer:
+    """A chat template close enough to Qwen3's to test train/inference parity.
+
+    The behaviour that matters, and that a naive stub would paper over: with
+    `add_generation_prompt=True, enable_thinking=False` the real template opens the
+    assistant turn *and* emits an **empty** `<think></think>` block, while an
+    assistant message passed inside the message list is rendered without one. That
+    asymmetry is the entire reason `train_lora.render_example` concatenates the
+    inference prefix instead of handing the assistant turn to
+    `apply_chat_template` — so the fake has to reproduce it, or the parity test
+    proves nothing.
+
+    `enable_thinking` defaults to `True` and raises: a call site that forgets to
+    pass it fails loudly here on the laptop rather than silently on a T4 (SPEC
+    §3.7), where the only symptom is a ruined `schema_valid_rate`.
+    """
+
+    eos_token = "<|im_end|>"
+
+    def apply_chat_template(
+        self,
+        messages: Any,
+        *,
+        tokenize: bool = False,
+        add_generation_prompt: bool = False,
+        enable_thinking: bool = True,
+        **_kw: Any,
+    ) -> str:
+        if tokenize:
+            raise NotImplementedError("the laptop never tokenizes for real (SPEC §2.1)")
+        if enable_thinking:
+            raise AssertionError(
+                "SPEC §3.7: every apply_chat_template call passes enable_thinking=False"
+            )
+        out = "".join(f"<|im_start|>{m['role']}\n{m['content']}<|im_end|>\n" for m in messages)
+        if add_generation_prompt:
+            out += "<|im_start|>assistant\n<think>\n\n</think>\n\n"
+        return out
+
+    def __call__(self, text: str) -> dict[str, Any]:
+        """A crude whitespace tokenizer — `token_length_stats` only needs lengths."""
+        return {"input_ids": text.split()}
+
+
+def train_row(i: int = 0, *, text: str | None = None, **over: Any) -> dict[str, Any]:
+    """One `train.jsonl` row: `labeled_row` is already exactly that shape."""
+    return labeled_row(doc(i, text=text), **over)

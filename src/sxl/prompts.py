@@ -3,7 +3,8 @@
 Created by F2 for the teacher. **F5 appends its student prompts below the marker
 at the bottom of this file and edits nothing above it** -- the teacher prompt is
 production labeling machinery, the student prompt is part of a measured arm, and
-conflating them would make the baseline arm untraceable.
+conflating them would make the baseline arm untraceable. F6 appends its
+fine-tune prompt below a marker of its own, on the same terms.
 
 `truncate` is shared infrastructure, not a teacher detail: SPEC §3.6 requires the
 `MAX_INPUT_CHARS` truncation to be *identical* in every arm, and one function is
@@ -30,6 +31,7 @@ from sxl.schema import JSON_SCHEMA
 
 __all__ = [
     "FEWSHOT_IDS",
+    "FT_PROMPT_SHA",
     "MAX_INPUT_CHARS",
     "MAX_NEW_TOKENS",
     "NULL_UNKNOWN_RULE",
@@ -37,10 +39,12 @@ __all__ = [
     "PROMPT_VERSION",
     "SCHEMA_BLOCK",
     "STUDENT_PROMPT_SHA",
+    "SYSTEM_FT",
     "SYSTEM_STUDENT",
     "SYSTEM_TEACHER",
     "TEACHER_PROMPT_SHA",
     "TEMPERATURE",
+    "build_ft_prompt",
     "build_student_prompt",
     "build_teacher_prompt",
     "pick_fewshot",
@@ -340,3 +344,42 @@ def build_student_prompt(text: str, shots: Sequence[dict]) -> list[dict[str, str
         )
     messages.append({"role": "user", "content": truncate(text)})
     return messages
+
+
+# --- F6 appends its fine-tune prompt below this line. Nothing above is edited. --
+
+#: The system prompt of the `lora_ft` arms. Deliberately ~25 tokens: no schema, no
+#: exemplars, not even `NULL_UNKNOWN_RULE`. That absence is the arm's defining
+#: property -- the whole point of fine-tuning is that the schema moves out of the
+#: prompt and into the weights, and keeping `SCHEMA_BLOCK` here (~1.5k tokens)
+#: would erase the latency and cost advantage this project exists to measure.
+#: `tests/test_ft_prompt_len.py` is the regression test on that claim.
+#:
+#: Named `SYSTEM_FT` rather than F6 §Scope-1's `TRAIN_SYSTEM`: it matches
+#: `SYSTEM_TEACHER` / `SYSTEM_STUDENT` above, and a "TRAIN_" prefix would
+#: misdescribe a constant that is *also* the inference prompt. Scope-1's one
+#: insistence is that training and inference cannot drift apart, and a name
+#: implying two of them is an invitation to add a second.
+SYSTEM_FT = (
+    "You extract structured data from job postings. "
+    "Return one JSON object with the 16 JobPosting fields and nothing else."
+)
+
+#: Recorded in the `sxl gpu predict` run log for the two `lora_ft` arms, exactly
+#: as `STUDENT_PROMPT_SHA` is for the baseline. No `FEWSHOT_IDS` term because
+#: there are no exemplars to fold in.
+FT_PROMPT_SHA = prompt_sha(PROMPT_VERSION, SYSTEM_FT, str(MAX_INPUT_CHARS))
+
+
+def build_ft_prompt(text: str) -> list[dict[str, str]]:
+    """Chat messages for one document under the fine-tuned arms: system, then doc.
+
+    Matches `runner.PromptFn` exactly, so `sxl gpu predict` hands this function
+    itself to `predict_arm` and F6 adds no generation code.
+    `gpu/train_lora.render_example` builds its training text on top of this same
+    builder, so the two cannot drift (SPEC §3.7).
+    """
+    return [
+        {"role": "system", "content": SYSTEM_FT},
+        {"role": "user", "content": truncate(text)},
+    ]
