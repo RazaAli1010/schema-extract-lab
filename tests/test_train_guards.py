@@ -10,6 +10,8 @@ Laptop only. Nothing here imports torch — which is itself the point of
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from _fakes import FakeQwenTokenizer, train_row
@@ -17,6 +19,8 @@ from sxl.gpu import train_lora
 from sxl.gpu.train_lora import (
     TrainError,
     assert_no_leakage,
+    effective_batch,
+    harvest_losses,
     newest_checkpoint,
     resolve_resume,
     token_length_stats,
@@ -177,6 +181,78 @@ def test_token_length_stats_is_deterministic_and_respects_the_sample_cap():
     assert first == token_length_stats(rows, TOK, sample=10)
     assert first["n_sampled"] == 10
     assert 0 < first["p50"] <= first["p95"] <= first["max"]
+
+
+# --- effective_batch -----------------------------------------------------------
+
+
+def test_effective_batch_counts_dataparallel_and_ddp_without_double_counting():
+    """Kaggle's `GPU T4 x2` makes Trainer use both cards on its own initiative.
+
+    DataParallel is one process over N cards; DDP is N processes over one card
+    each. Multiplying both factors is right for either, and for the single-GPU
+    case they are both 1.
+    """
+    assert effective_batch(2, 8) == 16  # one card, as configured
+    assert effective_batch(2, 8, n_gpu=2) == 32  # DataParallel — what Kaggle did
+    assert effective_batch(2, 8, world_size=2) == 32  # DDP
+    assert effective_batch(1, 16, n_gpu=2) == 32  # the OOM fallback, still doubled
+
+
+def test_effective_batch_treats_zero_as_one():
+    """`TrainingArguments.n_gpu` reads 0 on a CPU-only box; that is one batch, not none."""
+    assert effective_batch(2, 8, n_gpu=0, world_size=0) == 16
+
+
+# --- harvest_losses ------------------------------------------------------------
+
+
+def test_a_run_shorter_than_logging_steps_still_reports_its_train_loss():
+    """The regression this function exists for.
+
+    `log_history` gains a `"loss"` entry every `logging_steps` (10) steps, so the
+    mandated 5-step smoke run logs none at all. Reading the history first yielded
+    NaN for a healthy run, and `train()` then refused to write the adapter because
+    it believed fp16 had diverged. These are the real numbers from that run.
+    """
+    metrics = {"train_loss": 3.25, "train_runtime": 152.9}
+    history = [{"eval_loss": 2.79, "epoch": 5}]  # eval logged, train loss not
+
+    train_loss, eval_loss = harvest_losses(metrics, history, best_metric=None)
+
+    assert train_loss == 3.25
+    assert eval_loss == 2.79
+
+
+def test_a_genuine_nan_still_comes_through_as_nan():
+    """The guard must keep working — this is the T4 fp16 hazard it exists for."""
+    train_loss, _ = harvest_losses({"train_loss": float("nan")}, [], best_metric=None)
+
+    assert math.isnan(train_loss)
+
+
+def test_best_metric_wins_over_the_history_minimum():
+    """With `load_best_model_at_end`, the Trainer's own best is authoritative."""
+    history = [{"eval_loss": 2.0}, {"eval_loss": 1.5}, {"eval_loss": 1.8}]
+
+    _, eval_loss = harvest_losses({"train_loss": 1.0}, history, best_metric=1.5)
+
+    assert eval_loss == 1.5
+
+
+def test_the_history_supplies_the_train_loss_when_metrics_does_not():
+    history = [{"loss": 4.0}, {"loss": 3.0}, {"eval_loss": 2.5}]
+
+    train_loss, eval_loss = harvest_losses({}, history, best_metric=None)
+
+    assert train_loss == 3.0  # the LAST logged step, not the first
+    assert eval_loss == 2.5
+
+
+def test_a_run_with_no_losses_anywhere_is_nan_not_a_crash():
+    train_loss, eval_loss = harvest_losses({}, [], best_metric=None)
+
+    assert math.isnan(train_loss) and math.isnan(eval_loss)
 
 
 def test_token_length_stats_handles_an_empty_corpus():
