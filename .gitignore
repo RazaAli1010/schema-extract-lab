@@ -35,3 +35,9 @@ venv/
 .ipynb_checkpoints/
 
 # --- notebook outputs are the artifact; keep them, but not the checkpoints ---
+# F6 downloads land here by accident more often than anyone expects. The weight
+# globs above already catch the files; these catch the directories, including the
+# adapter_config.json / tokenizer.json that would otherwise sneak in beside them.
+checkpoint-*/
+ckpt_latest/
+adapter/
