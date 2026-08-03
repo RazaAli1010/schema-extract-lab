@@ -71,6 +71,7 @@ STATS_KEYS = (
     "best_eval_loss",
     "train_runtime_s",
     "gpu_name",
+    "n_gpus",
     "dtype",
     "peak_vram_gb",
     "generated_at",
@@ -218,6 +219,21 @@ def _percentile(sorted_values: Sequence[int], q: float) -> int:
         return 0
     idx = min(len(sorted_values) - 1, max(0, math.ceil(q * len(sorted_values)) - 1))
     return int(sorted_values[idx])
+
+
+def effective_batch(batch_size: int, grad_accum: int, n_gpu: int = 1, world_size: int = 1) -> int:
+    """The real number of examples behind one optimizer step.
+
+    `n_gpu * world_size` covers both shapes without double-counting: DataParallel
+    is one process over several cards (`n_gpu=2, world_size=1`), DDP is several
+    processes over one card each (`n_gpu=1, world_size=2`).
+
+    Recorded rather than assumed because Kaggle's `GPU T4 x2` makes both cards
+    visible and `Trainer` wraps the model in DataParallel on its own initiative.
+    A run that silently trains at batch 32 while `train_stats.json` claims 16 is
+    not reproducible, and the discrepancy is invisible in the loss curve.
+    """
+    return batch_size * grad_accum * max(1, n_gpu) * max(1, world_size)
 
 
 def harvest_losses(
@@ -588,6 +604,21 @@ def train(
         result.metrics, trainer.state.log_history, trainer.state.best_metric
     )
 
+    # From the Trainer, not from our own arguments: on Kaggle's `GPU T4 x2` both
+    # cards are visible and Trainer wraps the model in DataParallel unasked, which
+    # doubles the examples per optimizer step. Reading it back is the difference
+    # between recording what ran and recording what we asked for.
+    n_gpu = max(1, int(getattr(trainer.args, "n_gpu", 1)))
+    world_size = max(1, int(getattr(trainer.args, "world_size", 1)))
+    n_gpus = n_gpu * world_size
+    batch_total = effective_batch(batch_size, grad_accum, n_gpu, world_size)
+    if n_gpus > 1:
+        echo(
+            f"[train] {n_gpus} GPUs in use -> effective batch {batch_total}, not "
+            f"{batch_size * grad_accum}. Recorded in train_stats.json; F7's latency "
+            "numbers are single-T4 and are unaffected."
+        )
+
     # A NaN loss under fp16 is the documented T4 hazard (SPEC §2.3). Refuse to
     # produce an adapter from it: a silently broken adapter costs a full inference
     # run to discover.
@@ -620,6 +651,7 @@ def train(
         "best_eval_loss": round(float(best_eval_loss), 6),
         "train_runtime_s": round(float(result.metrics.get("train_runtime", 0.0)), 2),
         "gpu_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "cpu",
+        "n_gpus": n_gpus,
         # float16 even on the 4-bit path: it is the compute dtype, and
         # `load_in_4bit` below carries the quantization fact separately.
         "dtype": "float16",
@@ -631,7 +663,7 @@ def train(
         "load_in_4bit": load_in_4bit,
         "max_length": max_length,
         "token_p95": len_stats["p95"],
-        "effective_batch_size": batch_size * grad_accum,
+        "effective_batch_size": batch_total,
         "n_steps": int(trainer.state.global_step),
         "lr": lr,
         "seed": seed,

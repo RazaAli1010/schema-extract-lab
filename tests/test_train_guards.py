@@ -19,6 +19,7 @@ from sxl.gpu import train_lora
 from sxl.gpu.train_lora import (
     TrainError,
     assert_no_leakage,
+    effective_batch,
     harvest_losses,
     newest_checkpoint,
     resolve_resume,
@@ -180,6 +181,27 @@ def test_token_length_stats_is_deterministic_and_respects_the_sample_cap():
     assert first == token_length_stats(rows, TOK, sample=10)
     assert first["n_sampled"] == 10
     assert 0 < first["p50"] <= first["p95"] <= first["max"]
+
+
+# --- effective_batch -----------------------------------------------------------
+
+
+def test_effective_batch_counts_dataparallel_and_ddp_without_double_counting():
+    """Kaggle's `GPU T4 x2` makes Trainer use both cards on its own initiative.
+
+    DataParallel is one process over N cards; DDP is N processes over one card
+    each. Multiplying both factors is right for either, and for the single-GPU
+    case they are both 1.
+    """
+    assert effective_batch(2, 8) == 16  # one card, as configured
+    assert effective_batch(2, 8, n_gpu=2) == 32  # DataParallel — what Kaggle did
+    assert effective_batch(2, 8, world_size=2) == 32  # DDP
+    assert effective_batch(1, 16, n_gpu=2) == 32  # the OOM fallback, still doubled
+
+
+def test_effective_batch_treats_zero_as_one():
+    """`TrainingArguments.n_gpu` reads 0 on a CPU-only box; that is one batch, not none."""
+    assert effective_batch(2, 8, n_gpu=0, world_size=0) == 16
 
 
 # --- harvest_losses ------------------------------------------------------------
