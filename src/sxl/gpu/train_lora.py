@@ -220,6 +220,39 @@ def _percentile(sorted_values: Sequence[int], q: float) -> int:
     return int(sorted_values[idx])
 
 
+def harvest_losses(
+    metrics: dict[str, Any],
+    log_history: Sequence[dict[str, Any]],
+    best_metric: float | None = None,
+) -> tuple[float, float]:
+    """`(final_train_loss, best_eval_loss)` from what the Trainer reports.
+
+    `metrics["train_loss"]` first, `log_history` only as the fallback. The other
+    order looks equivalent and is not: `log_history` gains a `"loss"` entry every
+    `logging_steps` steps, so a run shorter than that -- exactly the 5-step smoke
+    run this project mandates -- logs nothing at all, and scanning it first yields
+    NaN for a perfectly healthy run. `train()` then refuses to write the adapter
+    because it believes fp16 diverged. `metrics` is populated on every run.
+
+    `best_metric` is only set when `load_best_model_at_end` is on, which the smoke
+    path turns off, so `eval_loss` falls back to the minimum seen in the history.
+    """
+    final_train_loss = metrics.get("train_loss")
+    if final_train_loss is None:
+        final_train_loss = next(
+            (entry["loss"] for entry in reversed(log_history) if "loss" in entry), float("nan")
+        )
+
+    best_eval_loss = best_metric
+    if best_eval_loss is None:
+        eval_losses = [e["eval_loss"] for e in log_history if "eval_loss" in e]
+        if not eval_losses:
+            eval_losses = [metrics["eval_loss"]] if "eval_loss" in metrics else []
+        best_eval_loss = min(eval_losses) if eval_losses else float("nan")
+
+    return float(final_train_loss), float(best_eval_loss)
+
+
 def newest_checkpoint(directory: Path | str) -> Path | None:
     """The highest-numbered `checkpoint-N` in `directory`, or None.
 
@@ -551,14 +584,9 @@ def train(
         echo(f"[train] resuming from {resume}")
     result = trainer.train(resume_from_checkpoint=resume)
 
-    history = trainer.state.log_history
-    final_train_loss = next(
-        (entry["loss"] for entry in reversed(history) if "loss" in entry), float("nan")
+    final_train_loss, best_eval_loss = harvest_losses(
+        result.metrics, trainer.state.log_history, trainer.state.best_metric
     )
-    eval_losses = [entry["eval_loss"] for entry in history if "eval_loss" in entry]
-    best_eval_loss = trainer.state.best_metric
-    if best_eval_loss is None:
-        best_eval_loss = min(eval_losses) if eval_losses else float("nan")
 
     # A NaN loss under fp16 is the documented T4 hazard (SPEC §2.3). Refuse to
     # produce an adapter from it: a silently broken adapter costs a full inference
