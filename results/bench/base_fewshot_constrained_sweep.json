@@ -1,0 +1,26 @@
+{
+  "arm": "base_fewshot_constrained",
+  "gpu_name": "Tesla T4",
+  "dtype": "float16",
+  "n_docs": 10,
+  "warmup": 5,
+  "cache_implementation": "dynamic",
+  "sweep": [
+    {
+      "batch_size": 1,
+      "throughput_docs_per_s": 0.0803,
+      "amortized_ms_per_doc": 12448.1,
+      "peak_vram_gb": 6.0,
+      "mean_completion_tokens": 161.7,
+      "oom": false
+    }
+  ],
+  "best_batch_size": 1,
+  "best_throughput_docs_per_s": 0.0803,
+  "best_amortized_ms_per_doc": 12453.3,
+  "best_cost_per_1k_docs_usd": 1.210738,
+  "gpu_hourly_usd": 0.35,
+  "note": "No batch sweep: the Outlines path generates one document per call, so batch size has no effect. Figures mirror the single-stream measurement.",
+  "generated_at": "2026-08-04T08:50:38Z",
+  "git_sha": "unknown"
+}

@@ -1,0 +1,50 @@
+{
+  "arm": "base_fewshot",
+  "gpu_name": "Tesla T4",
+  "dtype": "float16",
+  "n_docs": 10,
+  "warmup": 5,
+  "cache_implementation": "dynamic",
+  "sweep": [
+    {
+      "batch_size": 1,
+      "throughput_docs_per_s": 0.0633,
+      "amortized_ms_per_doc": 15802.08,
+      "peak_vram_gb": 5.99,
+      "mean_completion_tokens": 221.0,
+      "oom": false
+    },
+    {
+      "batch_size": 2,
+      "throughput_docs_per_s": 0.1107,
+      "amortized_ms_per_doc": 9037.16,
+      "peak_vram_gb": 4.48,
+      "mean_completion_tokens": 221.0,
+      "oom": false
+    },
+    {
+      "batch_size": 4,
+      "throughput_docs_per_s": 0.1153,
+      "amortized_ms_per_doc": 8674.95,
+      "peak_vram_gb": 5.746,
+      "mean_completion_tokens": 248.8,
+      "oom": false
+    },
+    {
+      "batch_size": 8,
+      "throughput_docs_per_s": 0.0863,
+      "amortized_ms_per_doc": 11582.64,
+      "peak_vram_gb": 8.279,
+      "mean_completion_tokens": 248.8,
+      "oom": false
+    }
+  ],
+  "best_batch_size": 8,
+  "best_throughput_docs_per_s": 0.0863,
+  "best_amortized_ms_per_doc": 11587.49,
+  "best_cost_per_1k_docs_usd": 1.126561,
+  "gpu_hourly_usd": 0.35,
+  "note": "",
+  "generated_at": "2026-08-04T08:41:45Z",
+  "git_sha": "unknown"
+}
