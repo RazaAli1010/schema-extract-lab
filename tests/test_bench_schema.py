@@ -24,6 +24,7 @@ from sxl.gpu.bench import (
     build_bench_record,
     build_sweep_record,
     cost_per_1k,
+    whole_batches,
 )
 
 # A plausible T4 measurement: ~150 tokens at ~50 tok/s.
@@ -202,6 +203,35 @@ def test_best_batch_size_is_the_largest_that_survived_not_the_fastest_measured()
 def test_an_all_oom_sweep_raises_rather_than_inventing_a_best():
     with pytest.raises(BenchError):
         best_batch_size([sweep_entry(16, oom=True), sweep_entry(32, oom=True)])
+
+
+# --- the sweep only measures whole batches -----------------------------------
+
+
+def test_a_sweep_measures_only_whole_batches():
+    # A trailing partial batch (8 then 2) runs at a narrower width than the entry's
+    # label claims and drags the measured throughput down.
+    assert whole_batches(100, 8) == 96
+    assert whole_batches(10, 4) == 8
+    assert whole_batches(100, 1) == 100
+
+
+def test_a_batch_size_larger_than_the_corpus_yields_nothing_to_measure():
+    # The bug this exists to prevent: with n_docs=10, a batch_size=32 entry would
+    # otherwise measure a batch of 10 and report it as 32.
+    assert whole_batches(10, 16) == 0
+    assert whole_batches(10, 32) == 0
+    assert whole_batches(0, 1) == 0
+
+
+def test_an_exactly_divisible_corpus_uses_every_document():
+    assert whole_batches(32, 32) == 32
+    assert whole_batches(96, 8) == 96
+
+
+def test_a_non_positive_batch_size_raises():
+    with pytest.raises(BenchError):
+        whole_batches(100, 0)
 
 
 # --- the guard runs on the way to disk ---------------------------------------
