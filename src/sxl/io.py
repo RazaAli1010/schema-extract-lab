@@ -53,6 +53,36 @@ def append_jsonl(path: Path, row: dict[str, Any]) -> None:
         fh.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
+def read_json(path: Path) -> Any:
+    """Parse a whole JSON file, naming the path on malformed input.
+
+    The `results/*.json` artifacts are small and read whole, so unlike
+    `read_jsonl` this does not stream. Fails loudly (SPEC §5.5) — a truncated
+    artifact must not reach a report as a silently empty dict.
+    """
+    path = Path(path)
+    with open(path, encoding="utf-8") as fh:
+        try:
+            return json.load(fh)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{path}: malformed JSON: {exc}") from exc
+
+
+def write_text(path: Path, text: str) -> None:
+    """Write UTF-8 text atomically with `\\n` line endings.
+
+    The markdown counterpart of `write_json`, and atomic for the same reason: a
+    killed run must never leave half a results table where the next reader — or a
+    `git diff` — will treat it as the finished artifact.
+    """
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    with open(tmp, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+    os.replace(tmp, path)
+
+
 def write_json(path: Path, obj: Any, *, sort_keys: bool = True) -> None:
     """Write pretty JSON atomically: sorted keys, indent 2, trailing newline.
 

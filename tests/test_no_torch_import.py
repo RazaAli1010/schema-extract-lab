@@ -12,7 +12,7 @@ import textwrap
 def test_importing_sxl_does_not_import_torch():
     code = textwrap.dedent("""
         import sys
-        import sxl, sxl.cli, sxl.corpus, sxl.metrics, sxl.schema, sxl.teacher
+        import sxl, sxl.cli, sxl.corpus, sxl.metrics, sxl.report, sxl.schema, sxl.teacher
         assert "torch" not in sys.modules, sorted(m for m in sys.modules if "torch" in m)
     """)
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
@@ -65,6 +65,28 @@ def test_importing_sxl_metrics_does_not_import_a_numeric_stack():
             if m.split(".")[0] in {"numpy", "scipy", "sklearn", "pandas"}
         )
         assert not banned, banned
+    """)
+    assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
+def test_importing_sxl_report_does_not_import_a_numeric_or_templating_stack():
+    """F8 acceptance: markdown tables are f-strings.
+
+    `tabulate`, `jinja2` and `pandas` would each be a dependency added to a 5 GB
+    laptop for string formatting, and `matplotlib` (~60 MB) for charts a table
+    renders better anyway. `sxl.report` reaches into `sxl.gpu.bench` for F7's
+    `cost_per_1k` rather than copying the formula, so this also pins that import
+    inside the function body where it belongs.
+    """
+    code = textwrap.dedent("""
+        import sys
+        import sxl.report
+        banned = sorted(
+            m for m in sys.modules
+            if m.split(".")[0] in {"torch", "numpy", "pandas", "matplotlib", "jinja2", "tabulate"}
+        )
+        assert not banned, banned
+        assert "sxl.gpu.bench" not in sys.modules, "F7's cost helper must be imported lazily"
     """)
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
 
