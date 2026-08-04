@@ -26,6 +26,7 @@ EVAL_GOLD_PATH = DATA / "gold" / "eval_gold.jsonl"
 PREDICTIONS_DIR = ARTIFACTS / "predictions"
 METRICS_DIR = RESULTS / "metrics"
 BENCH_DIR = RESULTS / "bench"
+TABLES_DIR = RESULTS / "tables"
 CORPUS_STATS_PATH = RESULTS / "corpus_stats.json"
 
 # Hugging Face downloads are redirected here so a build never fills ~/.cache on a
@@ -115,6 +116,10 @@ TEACHER_MAX_SKILLS_EMPTY_SHARE = 0.5
 GOLD_CANDIDATES_PATH = DATA / "gold" / "_candidates.jsonl"  # sampled, pre-verification
 GOLD_PROGRESS_PATH = DATA / "gold" / "_progress.jsonl"  # append-only edit log
 GOLD_STATS_PATH = RESULTS / "gold_stats.json"
+# Hand-written provenance for the gold set: how it was reviewed, what a human
+# audit of a 28-document sample found, and the caveats that go with it. F8 reads
+# it so the README's honesty about the eval set is sourced, not composed.
+GOLD_AUDIT_PATH = RESULTS / "gold_review_audit.json"
 
 # char_len bin edges for stratified sampling. An unstratified sample
 # under-represents long postings, which is exactly where extraction fails -- a
@@ -227,6 +232,23 @@ FT_ARMS = ("lora_ft", "lora_ft_constrained")
 if set(FT_ARMS) - set(ARMS):  # pragma: no cover - structural guard
     raise AssertionError(f"FT_ARMS is not a subset of ARMS: {FT_ARMS}")
 
+# --- report (F8) -------------------------------------------------------------
+# The generated artifacts. All four are COMMITTED: they are the deliverable
+# SPEC §1 cares about, and every cell in them must trace to a results/*.json.
+HEADLINE_PATH = TABLES_DIR / "headline.md"
+PER_FIELD_PATH = TABLES_DIR / "per_field.md"
+SWEEP_TABLE_PATH = TABLES_DIR / "sweep.md"
+README_FACTS_PATH = RESULTS / "README_FACTS.json"
+README_PATH = ROOT / "README.md"
+
+# Below this many gold values a per-field F1 is noise, not a measurement, and the
+# per-field table labels it `low-n` rather than letting it be quoted.
+REPORT_LOW_SUPPORT = 30
+# Rule-of-thumb standard error on a per-field F1 at n=300. Differences smaller
+# than this are not meaningful and the report says so instead of ranking them.
+# F4's out-of-scope note defers real bootstrap CIs; this is the honest stand-in.
+REPORT_NOISE_F1 = 0.03
+
 _DIRS = (
     DATA,
     DOCS_PATH.parent,
@@ -237,7 +259,7 @@ _DIRS = (
     RESULTS,
     METRICS_DIR,
     BENCH_DIR,
-    RESULTS / "tables",
+    TABLES_DIR,
 )
 
 

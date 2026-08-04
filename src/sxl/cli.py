@@ -10,6 +10,7 @@ them. Everything not yet implemented exits 2 naming the feature that owns it.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -42,8 +43,10 @@ from sxl.config import (
     METRICS_DIR,
     N_EVAL_GOLD,
     N_GOLD_CANDIDATES,
+    RESULTS,
     SEED,
     T4_HOURLY_USD,
+    TABLES_DIR,
     TEACHER_MODEL,
     TEACHER_PRICE_USD,
     TRAIN_BATCH_SIZE,
@@ -990,10 +993,105 @@ def bench_teacher(
 
 
 # --- F8 ----------------------------------------------------------------------
+def _echo_unicode(text: str) -> None:
+    """`typer.echo` that survives a legacy console codepage.
+
+    The tables carry `Δ` and `—`. On a Windows console still running cp1252 those
+    raise `UnicodeEncodeError` mid-print, which would make `sxl report build`
+    look broken on the exact machine this project is developed on. The *files*
+    are always written UTF-8 by `io.write_text`; only this preview degrades.
+    """
+    try:
+        typer.echo(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "ascii"
+        typer.echo(text.encode(encoding, errors="replace").decode(encoding))
+
+
 @report_app.command("build")
-def report_build() -> None:
-    """Aggregate results into results/tables/headline.md and the README."""
-    _not_yet("report build", "F8")
+def report_build(
+    results_dir: Annotated[
+        Path | None,
+        typer.Option("--results-dir", help=f"where to read artifacts [default: {RESULTS}]"),
+    ] = None,
+    out_dir: Annotated[
+        Path | None,
+        typer.Option("--out-dir", help=f"where to write the tables [default: {TABLES_DIR}]"),
+    ] = None,
+    readme: Annotated[
+        bool, typer.Option("--readme/--no-readme", help="also regenerate README.md")
+    ] = True,
+    strict: Annotated[
+        bool,
+        typer.Option("--strict/--no-strict", help="exit 1 if a README claim is unsupported"),
+    ] = True,
+) -> None:
+    """Aggregate results into results/tables/ and regenerate the README.
+
+    Buildable at any point in the project: arms that have not been run yet render
+    as an em dash and are named in a warning, because the report is most useful
+    exactly when it is incomplete and you are deciding what to run next.
+    """
+    from sxl.io import write_json, write_text
+    from sxl.report import (
+        ReportPaths,
+        build_headline,
+        build_per_field,
+        build_readme,
+        build_sweep,
+        check_claims,
+        facts,
+        load_results,
+        splice_readme,
+    )
+
+    ensure_dirs()
+    paths = ReportPaths.default()
+    if results_dir is not None:
+        paths = paths.with_results_dir(results_dir)
+    if out_dir is not None:
+        paths = paths.with_out_dir(out_dir)
+
+    results = load_results(paths)
+    for warning in results["missing"]:
+        typer.secho(f"[report] {warning}", fg=typer.colors.YELLOW, err=True)
+
+    headline = build_headline(results)
+    for path, text in (
+        (paths.headline, headline),
+        (paths.per_field, build_per_field(results)),
+        (paths.sweep, build_sweep(results)),
+    ):
+        write_text(path, text)
+        typer.echo(f"wrote {path}")
+
+    facts_dict = facts(results)
+    write_json(paths.facts, facts_dict)
+    typer.echo(f"wrote {paths.facts}")
+
+    violations: list[str] = []
+    if readme:
+        existing = paths.readme.read_text(encoding="utf-8") if paths.readme.exists() else ""
+        generated = build_readme(facts_dict, build_headline(results, footer=False))
+        updated = splice_readme(existing, generated)
+        write_text(paths.readme, updated)
+        typer.echo(f"wrote {paths.readme}")
+        violations = check_claims(updated, facts_dict)
+
+    _echo_unicode(headline)
+
+    if violations:
+        for violation in violations:
+            typer.secho(f"[report] unsupported claim: {violation}", fg=typer.colors.RED, err=True)
+        typer.secho(
+            f"{len(violations)} claim(s) in README.md do not trace to "
+            f"{paths.facts.name} (SPEC §1.1). Fix the prose, not the guardrail.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        if strict:
+            # Exit 1, not 2: exit 2 means "not implemented" throughout this CLI.
+            raise typer.Exit(code=1)
 
 
 # --- F0 — the one real command ----------------------------------------------

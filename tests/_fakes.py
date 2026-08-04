@@ -461,3 +461,216 @@ class FakeQwenTokenizer:
 def train_row(i: int = 0, *, text: str | None = None, **over: Any) -> dict[str, Any]:
     """One `train.jsonl` row: `labeled_row` is already exactly that shape."""
     return labeled_row(doc(i, text=text), **over)
+
+
+# --- F8: a miniature `results/` tree ------------------------------------------
+#
+# Hand-chosen numbers, not realistic ones, so that every assertion in the report
+# tests is arithmetic a reader can check in their head: the teacher sits at
+# macro_f1 0.900 and `lora_ft` at 0.850, so the delta is exactly -0.050.
+
+#: macro_f1 per arm. `teacher` is the reference every delta is measured against.
+REPORT_MACRO_F1 = {
+    "base_fewshot": 0.500,
+    "base_fewshot_constrained": 0.600,
+    "lora_ft": 0.850,
+    "lora_ft_constrained": 0.840,
+    "teacher": 0.900,
+}
+REPORT_SCHEMA_VALID = {
+    "base_fewshot": 0.60,
+    "base_fewshot_constrained": 1.00,
+    "lora_ft": 0.98,
+    "lora_ft_constrained": 1.00,
+    "teacher": 1.00,
+}
+#: Single-stream p50. Deliberately far from the amortized figures below, so a
+#: test can assert the two columns are never the same number.
+REPORT_P50_MS = {
+    "base_fewshot": 9000.0,
+    "base_fewshot_constrained": 12000.0,
+    "lora_ft": 8000.0,
+    "lora_ft_constrained": 12500.0,
+    "teacher": 2000.0,
+}
+#: `posting_date` is the low-support field the per-field table must flag.
+REPORT_SUPPORT = {"posting_date": 12, "required_skills": 1500}
+REPORT_HOURLY_USD = 0.36  # not the real 0.35: a hardcoded rate would still pass
+
+
+def report_metrics(arm: str, **over: Any) -> dict[str, Any]:
+    """One `results/metrics/<arm>.json`, in the SPEC §3.3 key order."""
+    from sxl.schema import FIELD_NAMES
+
+    macro = REPORT_MACRO_F1.get(arm, 0.5)
+    per_field = {}
+    for i, field in enumerate(FIELD_NAMES):
+        # Ascending f1 in FIELD_NAMES order, so a table sorted by f1 must reorder
+        # them — a test that passed on an unsorted table would prove nothing.
+        per_field[field] = {
+            "em": round(macro + 0.01, 4),
+            "precision": macro,
+            "recall": macro,
+            "f1": round(0.10 + i * 0.05, 4),
+            "support": REPORT_SUPPORT.get(field, 200),
+        }
+    return {
+        "arm": arm,
+        "split": "eval_gold",
+        "n": 300,
+        "schema_valid_rate": REPORT_SCHEMA_VALID.get(arm, 1.0),
+        "macro_f1": macro,
+        "macro_f1_null_baseline": 0.0,
+        "n_missing_predictions": 0,
+        "per_field": per_field,
+        "generated_at": "2026-08-04T00:00:00Z",
+        "git_sha": "fixture",
+    } | over
+
+
+def report_bench(arm: str, **over: Any) -> dict[str, Any]:
+    """One `results/bench/<arm>.json`. The teacher's GPU fields are null."""
+    p50 = REPORT_P50_MS.get(arm, 9000.0)
+    teacher = arm == "teacher"
+    return {
+        "arm": arm,
+        "gpu_name": None if teacher else "Tesla T4",
+        "dtype": None if teacher else "float16",
+        "batch_size": 1,
+        "n_docs": 10,
+        "warmup": 5,
+        "repeats": 3,
+        "p50_ms": p50,
+        "p95_ms": p50 * 1.5,
+        "mean_ms": p50,
+        "throughput_docs_per_s": 1000.0 / p50,
+        "gpu_hourly_usd": None if teacher else REPORT_HOURLY_USD,
+        "cost_per_1k_docs_usd": 0.5 if teacher else 1.0,
+        "mean_completion_tokens": 120.0,
+        "measurement": "api_wall_clock" if teacher else "local_gpu",
+        "generated_at": "2026-08-04T00:00:00Z",
+        "git_sha": "fixture",
+    } | over
+
+
+def report_sweep(arm: str, **over: Any) -> dict[str, Any]:
+    """One `results/bench/<arm>_sweep.json`.
+
+    Batch 4 is the fastest row and batch 8 is the largest non-OOM one, which is
+    the divergence `best_sweep_entry` exists to resolve. Batch 16 OOMs and must
+    survive into the rendered table.
+    """
+    entries = [
+        {
+            "batch_size": 1,
+            "throughput_docs_per_s": 0.10,
+            "amortized_ms_per_doc": 10000.0,
+            "peak_vram_gb": 4.0,
+            "mean_completion_tokens": 120.0,
+            "oom": False,
+        },
+        {
+            "batch_size": 4,
+            "throughput_docs_per_s": 0.80,
+            "amortized_ms_per_doc": 1250.0,
+            "peak_vram_gb": 6.0,
+            "mean_completion_tokens": 120.0,
+            "oom": False,
+        },
+        {
+            "batch_size": 8,
+            "throughput_docs_per_s": 0.50,
+            "amortized_ms_per_doc": 2000.0,
+            "peak_vram_gb": 9.0,
+            "mean_completion_tokens": 120.0,
+            "oom": False,
+        },
+        {
+            "batch_size": 16,
+            "throughput_docs_per_s": 0.0,
+            "amortized_ms_per_doc": 0.0,
+            "peak_vram_gb": 0.0,
+            "mean_completion_tokens": 0.0,
+            "oom": True,
+        },
+    ]
+    return {
+        "arm": arm,
+        "gpu_name": "Tesla T4",
+        "dtype": "float16",
+        "n_docs": 10,
+        "warmup": 5,
+        "cache_implementation": "dynamic",
+        "sweep": entries,
+        "best_batch_size": 8,  # largest non-OOM, NOT the fastest — the whole point
+        "best_throughput_docs_per_s": 0.50,
+        "best_amortized_ms_per_doc": 2000.0,
+        "best_cost_per_1k_docs_usd": 0.2,
+        "gpu_hourly_usd": REPORT_HOURLY_USD,
+        "note": "",
+        "generated_at": "2026-08-04T00:00:00Z",
+        "git_sha": "fixture",
+    } | over
+
+
+def write_results_tree(root: Any, *, arms: Any = None, stats: bool = True) -> Any:
+    """Build a `results/` tree under `root` and return the matching `ReportPaths`.
+
+    `arms=("base_fewshot",)` produces the mid-project state F8 must survive: one
+    arm scored, everything else absent.
+    """
+    from sxl.config import ARMS
+    from sxl.io import write_json
+    from sxl.report import ReportPaths
+
+    arms = ARMS if arms is None else tuple(arms)
+    paths = ReportPaths.in_dir(root)
+    paths.metrics_dir.mkdir(parents=True, exist_ok=True)
+    paths.bench_dir.mkdir(parents=True, exist_ok=True)
+
+    for arm in arms:
+        write_json(paths.metrics_dir / f"{arm}.json", report_metrics(arm), sort_keys=False)
+        write_json(paths.bench_dir / f"{arm}.json", report_bench(arm), sort_keys=False)
+        if arm != "teacher":
+            write_json(paths.bench_dir / f"{arm}_sweep.json", report_sweep(arm), sort_keys=False)
+
+    if stats:
+        write_json(
+            paths.corpus_stats, {"n_kept": 7500, "source": "test/postings", "license": "mit"}
+        )
+        write_json(
+            paths.gold_stats,
+            {
+                "n_final": 300,
+                "reviewer": "model_verified",
+                "teacher_field_agreement": {
+                    "posting_date": 0.20,
+                    "company": 0.90,
+                    "title": 0.95,
+                    "seniority": 0.99,
+                },
+            },
+        )
+        write_json(
+            paths.gold_audit,
+            {"residual_error_sample": {"n": 28, "doc_error_rate": 0.25}},
+        )
+        write_json(
+            paths.teacher_stats,
+            {"teacher_model": "gpt-4o-mini", "n_ok": 4500, "spend_usd_cached": 1.10},
+        )
+        write_json(
+            paths.train_stats,
+            {
+                "base_model": "Qwen/Qwen3-1.7B",
+                "adapter_repo": "someone/qwen3-1.7b-jobpost-lora",
+                "n_train": 4500,
+                "epochs": 2,
+                "trainable_pct": 1.003,
+                "peak_vram_gb": 10.073,
+                "train_runtime_s": 11730.14,
+                "gpu_name": "Tesla T4",
+                "dtype": "float16",
+            },
+        )
+    return paths

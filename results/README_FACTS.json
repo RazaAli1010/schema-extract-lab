@@ -1,0 +1,100 @@
+{
+  "adapter_repo": "razaali1607/qwen3-1.7b-jobpost-lora",
+  "base_fewshot": {
+    "amortized_ms_per_doc": 8674.95,
+    "best_batch_size": 4,
+    "cost_per_1k_docs_usd": 0.84321094728727,
+    "cost_per_1k_docs_usd_batch1": 0.864966,
+    "delta_vs_teacher": -0.35419999999999996,
+    "macro_f1": 0.5704,
+    "p50_ms": 8899.9,
+    "p95_ms": 35753.4,
+    "schema_valid_rate": 0.62
+  },
+  "base_fewshot_constrained": {
+    "amortized_ms_per_doc": 12448.1,
+    "best_batch_size": 1,
+    "cost_per_1k_docs_usd": 1.2107375121073751,
+    "cost_per_1k_docs_usd_batch1": 1.210738,
+    "delta_vs_teacher": -0.24239999999999995,
+    "macro_f1": 0.6822,
+    "p50_ms": 12448.1,
+    "p95_ms": 39914.5,
+    "schema_valid_rate": 0.91
+  },
+  "base_model": "Qwen/Qwen3-1.7B",
+  "bench_n_docs": 10,
+  "bench_repeats": 3,
+  "best_eval_loss": 1.993557,
+  "corpus_license": "mit",
+  "corpus_source": "xanderios/linkedin-job-postings",
+  "dtype": "float16",
+  "generated_at": "2026-08-04T12:51:57Z",
+  "git_sha": "8578905",
+  "gold_audit_doc_error_rate": 0.25,
+  "gold_audit_n": 28,
+  "gold_reviewer": "model_verified",
+  "gpu_hourly_usd": 0.35,
+  "gpu_name": "Tesla T4",
+  "lora_ft": {
+    "amortized_ms_per_doc": 1427.52,
+    "best_batch_size": 8,
+    "cost_per_1k_docs_usd": 0.13878975335078117,
+    "cost_per_1k_docs_usd_batch1": 0.837401,
+    "delta_vs_teacher": -0.04059999999999997,
+    "macro_f1": 0.884,
+    "p50_ms": 8615.7,
+    "p95_ms": 10106.7,
+    "schema_valid_rate": 0.99
+  },
+  "lora_ft_constrained": {
+    "amortized_ms_per_doc": 12851.7,
+    "best_batch_size": 1,
+    "cost_per_1k_docs_usd": 1.2496429591545273,
+    "cost_per_1k_docs_usd_batch1": 1.249643,
+    "delta_vs_teacher": -0.04679999999999995,
+    "macro_f1": 0.8778,
+    "p50_ms": 12851.7,
+    "p95_ms": 14371.7,
+    "schema_valid_rate": 1.0
+  },
+  "low_support": 30,
+  "lowest_teacher_agreement": [
+    {
+      "agreement": 0.1667,
+      "field": "posting_date"
+    },
+    {
+      "agreement": 0.95,
+      "field": "education_level"
+    },
+    {
+      "agreement": 0.9567,
+      "field": "company"
+    }
+  ],
+  "lowest_teacher_agreement_str": "`posting_date` 0.167, `education_level` 0.950, `company` 0.957",
+  "macro_f1_null_baseline": 0.0,
+  "n_corpus": 7500,
+  "n_eval_gold": 300,
+  "n_train": 4500,
+  "noise_f1": 0.03,
+  "peak_vram_gb": 10.073,
+  "spend_usd": 1.101284,
+  "teacher": {
+    "amortized_ms_per_doc": null,
+    "best_batch_size": null,
+    "cost_per_1k_docs_usd": 0.48034,
+    "cost_per_1k_docs_usd_batch1": 0.48034,
+    "delta_vs_teacher": 0.0,
+    "macro_f1": 0.9246,
+    "p50_ms": 2173.1,
+    "p95_ms": 3518.9,
+    "schema_valid_rate": 1.0
+  },
+  "teacher_model": "gpt-4o-mini",
+  "train_epochs": 2,
+  "train_runtime_h": 3.258372222222222,
+  "train_runtime_s": 11730.14,
+  "trainable_pct": 1.003
+}

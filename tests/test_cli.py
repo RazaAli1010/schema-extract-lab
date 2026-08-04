@@ -11,11 +11,20 @@ from sxl.cli import app
 
 runner = CliRunner()
 
-# command -> the feature that owns it (SPEC §8). A feature deletes its entry when it
-# lands and replaces it with a `--help`-only test below.
-UNIMPLEMENTED = {
-    ("report", "build"): "F8",
-}
+#: Every command SPEC §4 promises, and the feature that owns it. F8 was the last
+#: entry in the old `UNIMPLEMENTED` map — with it landed, no command exits 2 any
+#: more, and this list keeps the contract itself under test.
+SPEC_COMMANDS = (
+    ("corpus", "build"),
+    ("teacher", "label"),
+    ("gold", "sample"),
+    ("gold", "verify"),
+    ("metrics", "score"),
+    ("gpu", "predict"),
+    ("gpu", "train"),
+    ("gpu", "bench"),
+    ("report", "build"),
+)
 
 
 def test_help_exits_zero_and_lists_every_group():
@@ -25,20 +34,18 @@ def test_help_exits_zero_and_lists_every_group():
         assert group in result.stdout
 
 
-@pytest.mark.parametrize(("group", "command"), sorted(UNIMPLEMENTED))
+@pytest.mark.parametrize(("group", "command"), SPEC_COMMANDS)
 def test_every_command_in_spec_section_4_is_registered(group, command):
     result = runner.invoke(app, [group, "--help"])
     assert result.exit_code == 0
     assert command in result.stdout
 
 
-@pytest.mark.parametrize(
-    ("group", "command", "feature"), sorted((g, c, f) for (g, c), f in UNIMPLEMENTED.items())
-)
-def test_unimplemented_commands_exit_2_naming_their_feature(group, command, feature):
-    result = runner.invoke(app, [group, command])
-    assert result.exit_code == 2
-    assert feature in result.output
+@pytest.mark.parametrize(("group", "command"), SPEC_COMMANDS)
+def test_no_command_still_exits_2(group, command):
+    """Exit 2 means "not implemented" in this CLI. Every feature has landed."""
+    result = runner.invoke(app, [group, command, "--help"])
+    assert result.exit_code == 0, result.output
 
 
 def test_corpus_build_is_implemented_and_exposes_its_options():
@@ -500,6 +507,14 @@ def test_metrics_score_rejects_an_unknown_arm_with_exit_1():
     result = runner.invoke(app, ["metrics", "score", "--arm", "nope"])
     assert result.exit_code == 1
     assert "base_fewshot" in result.output  # the valid arms are listed
+
+
+def test_report_build_is_implemented_and_exposes_its_options():
+    """F8 owns `report build`; it must no longer exit 2."""
+    result = runner.invoke(app, ["report", "build", "--help"])
+    assert result.exit_code == 0
+    for option in ("--results-dir", "--out-dir", "--readme", "--strict"):
+        assert option in result.output
 
 
 def test_schema_dump_to_stdout():
