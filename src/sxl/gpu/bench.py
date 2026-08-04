@@ -255,6 +255,26 @@ def spread_pct(values: Sequence[float]) -> float:
     return round((max(values) - min(values)) / mid * 100.0, 2)
 
 
+def whole_batches(n_available: int, batch_size: int) -> int:
+    """How many documents a sweep at `batch_size` may measure over.
+
+    Always a whole multiple of `batch_size`, and `0` when there are not enough
+    documents to fill even one batch. Both rules exist because a sweep entry is
+    labelled with the batch size it claims to have run at:
+
+    - a trailing **partial** batch (8 documents then 2) runs at a narrower width
+      than the label says and drags the measured throughput down;
+    - a batch size **larger than the corpus** (32 requested, 10 available) would
+      measure a batch of 10 and report it as 32, which is simply a false number.
+
+    That second case is invisible at `n_docs=100` and dominant at `n_docs=10`, so
+    it is arithmetic rather than a comment.
+    """
+    if batch_size < 1:
+        raise BenchError(f"batch_size must be positive, got {batch_size}")
+    return (max(n_available, 0) // batch_size) * batch_size
+
+
 def best_batch_size(sweep: Sequence[Mapping[str, Any]]) -> int:
     """The largest batch size that did not OOM.
 
@@ -552,6 +572,12 @@ def measure_sweep(
     An OOM is **recorded, not raised**: the point of sweeping to 32 on a 16 GB card
     is to find the wall, and crashing there would throw away every smaller batch
     size that already succeeded, along with the GPU minutes they cost (F7 §Scope 2).
+
+    A batch size too large to fill one whole batch from `n_docs` is **skipped**, not
+    measured -- see `whole_batches`. Skipped sizes are absent from the returned list
+    and `run` names them in the sweep file's `note`, because a reader who asked for
+    a sweep to 32 deserves to be told it did not happen rather than shown a batch of
+    10 wearing a "32" label.
     """
     import torch
 
@@ -564,6 +590,11 @@ def measure_sweep(
 
     results: list[dict[str, Any]] = []
     for batch_size in batch_sizes:
+        n_usable = whole_batches(len(rendered), batch_size)
+        if n_usable == 0:
+            continue
+        usable = rendered[:n_usable]
+
         torch.cuda.reset_peak_memory_stats()
         entry: dict[str, Any] = {
             "batch_size": int(batch_size),
@@ -578,24 +609,21 @@ def measure_sweep(
             # batch shape re-plans kernels and re-grows the KV cache, so warming at
             # width 10 would leave that cost inside the timed region for width 32.
             # It also means an over-large batch OOMs here rather than mid-measurement.
-            generate_batch(
-                model,
-                tok,
-                rendered[: min(batch_size, len(rendered))],
-                max_new_tokens=max_new_tokens,
-            )
+            generate_batch(model, tok, usable[:batch_size], max_new_tokens=max_new_tokens)
 
             tokens: list[int] = []
             sync()
             started = time.perf_counter()
-            for start in range(0, len(rendered), batch_size):
-                chunk = rendered[start : start + batch_size]
+            for start in range(0, n_usable, batch_size):
+                chunk = usable[start : start + batch_size]
                 for item in generate_batch(model, tok, chunk, max_new_tokens=max_new_tokens):
                     tokens.append(int(item["completion_tokens"]))
             sync()
             elapsed_s = time.perf_counter() - started
 
-            throughput = len(window) / elapsed_s if elapsed_s > 0 else 0.0
+            # Over `n_usable`, not `n_docs`: every batch timed above ran at the full
+            # labelled width, so the divisor must be what was actually measured.
+            throughput = n_usable / elapsed_s if elapsed_s > 0 else 0.0
             entry["throughput_docs_per_s"] = round(throughput, 4)
             entry["amortized_ms_per_doc"] = round(1000.0 / throughput, 2) if throughput else 0.0
             entry["peak_vram_gb"] = round(torch.cuda.max_memory_allocated() / 1024**3, 3)
@@ -746,7 +774,18 @@ def run(
             n_docs=n_docs,
             max_new_tokens=max_new_tokens,
         )
-        note = ""
+        # A requested batch size that could not fill one whole batch from `n_docs`
+        # was skipped rather than measured at a narrower width and mislabelled.
+        # Say which, in the file, so the gap is not read as an OOM.
+        measured = {int(e["batch_size"]) for e in sweep}
+        skipped = [int(b) for b in batch_sizes if int(b) not in measured]
+        note = (
+            f"Batch sizes {skipped} were skipped: n_docs={n_docs} cannot fill one whole "
+            "batch at those widths, and measuring a narrower batch under a wider label "
+            "would be a false number. Raise --n-docs to sweep them."
+            if skipped
+            else ""
+        )
 
     sweep_record = build_sweep_record(
         arm=arm,
