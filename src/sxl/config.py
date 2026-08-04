@@ -141,6 +141,41 @@ GEN_BATCH_SIZE = 8
 KAGGLE_TMP = Path("/kaggle/tmp")
 KAGGLE_WORKING = Path("/kaggle/working")
 
+# --- benchmark (F7) ----------------------------------------------------------
+# Documents per single-stream measurement. F7's own spec says 200, but 200 x
+# BENCH_REPEATS x 4 arms at the p50 that same spec predicts (1.5-4 s) is 4-5
+# hours against a 2.5 h acceptance cap. Halving is the honest resolution: it
+# applies to every arm equally so it cannot flatter one, all three repeats stay
+# real, and `n_docs` is written into every bench file so the sample size is never
+# something a reader has to take on trust. Raise it if the quota allows.
+BENCH_N_DOCS = 100
+# Untimed iterations before the clock starts. The CUDA context, kernel autotune,
+# and the first `sdpa` call are one-time costs that would otherwise all land in
+# measurement #1 and drag the mean without touching the median -- which is
+# exactly the kind of discrepancy that makes a benchmark untrustworthy.
+BENCH_WARMUP = 10
+BENCH_BATCH_SIZES = (1, 2, 4, 8, 16, 32)
+BENCH_REPEATS = 3  # Kaggle GPUs are shared and thermally variable; report the spread
+
+# transformers' default. The F7 spec suggests trying `"static"`, but
+# `runner.generate_batch` takes no cache argument, so every committed number in
+# results/metrics/* was produced under the dynamic cache. Benchmarking static
+# would time a code path no accuracy number came from and quietly make the two
+# tables incomparable. Emitted into every bench file, identical across arms.
+BENCH_CACHE_IMPL = "dynamic"
+
+# The plausibility guard. A T4 runs a 1.7B model at 40-70 tok/s single-stream, so
+# anything above this is not a fast model -- it is a missing
+# `torch.cuda.synchronize()` timing kernel *launches* instead of execution, or a
+# generation that hit EOS after two tokens. Both must raise, because both would
+# otherwise "confirm" the 45 ms/doc figure SPEC §1.1 exists to disown.
+BENCH_MAX_TOK_PER_S = 500.0
+BENCH_SPREAD_WARN_PCT = 15.0  # p50 spread across repeats worth calling out in F8
+
+# Synchronous teacher calls for the network-latency probe. ~50 is enough for a
+# stable p50/p95 and costs about $0.02 at standard rates.
+BENCH_TEACHER_N = 50
+
 # --- LoRA fine-tune (F6) -----------------------------------------------------
 # r=16 / alpha=32 on all seven attention+MLP projections is the standard "attach
 # everything" recipe. At 1.7B it lands near 1% trainable, which `train()` checks

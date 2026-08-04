@@ -20,7 +20,7 @@ did, and `schema_valid` must mean the same thing in all five arms.
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any
 
 from sxl.config import MAX_NEW_TOKENS
@@ -32,6 +32,7 @@ def build_constrained_generator(
     model,
     tok,
     max_new_tokens: int = MAX_NEW_TOKENS,
+    on_index_built: Callable[[float], None] | None = None,
 ) -> GenerateFn:
     """Return a `GenerateFn` that decodes under the `JobPosting` grammar.
 
@@ -49,10 +50,20 @@ def build_constrained_generator(
     Because there is no batch to amortize over, `latency_ms` here is genuine
     per-document wall time -- but it is still *not* a benchmark number. F7 owns
     latency exclusively, with warmup and percentiles this function does not do.
+
+    `on_index_built` receives the generator's construction time in seconds. F5
+    passes nothing and is unaffected; F7 uses it to report `index_build_s`, the
+    one-time startup cost of constrained decoding, separately from per-document
+    latency. Note that this covers construction only -- Outlines compiles the
+    schema itself lazily on the first generation, and `bench._measure_index_build`
+    adds that part.
     """
     import outlines
 
+    started = time.perf_counter()
     generator = outlines.from_transformers(model, tok)
+    if on_index_built is not None:
+        on_index_built(time.perf_counter() - started)
 
     def _generate(batch: Sequence[Messages]) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []

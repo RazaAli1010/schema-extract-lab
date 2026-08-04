@@ -14,7 +14,6 @@ runner = CliRunner()
 # command -> the feature that owns it (SPEC §8). A feature deletes its entry when it
 # lands and replaces it with a `--help`-only test below.
 UNIMPLEMENTED = {
-    ("gpu", "bench"): "F7",
     ("report", "build"): "F8",
 }
 
@@ -22,7 +21,7 @@ UNIMPLEMENTED = {
 def test_help_exits_zero_and_lists_every_group():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for group in ("corpus", "teacher", "gold", "metrics", "gpu", "report", "schema"):
+    for group in ("corpus", "teacher", "gold", "metrics", "gpu", "bench", "report", "schema"):
         assert group in result.stdout
 
 
@@ -99,6 +98,53 @@ def test_gpu_predict_rejects_an_unknown_arm_with_exit_1():
     result = runner.invoke(app, ["gpu", "predict", "--arm", "nope"])
     assert result.exit_code == 1
     assert "base_fewshot" in result.output
+
+
+def test_gpu_bench_is_implemented_and_exposes_its_options():
+    """F7 owns `gpu bench`; it must no longer exit 2. Never invoked here — it needs a GPU."""
+    result = runner.invoke(app, ["gpu", "bench", "--help"])
+    assert result.exit_code == 0
+    for option in ("--arm", "--adapter", "--n-docs", "--batch-sizes", "--hourly-usd"):
+        assert option in result.output
+    for option in ("--repeats", "--out-dir", "--warmup"):
+        assert option in result.output
+
+
+def test_gpu_bench_rejects_an_unknown_arm_with_exit_1():
+    result = runner.invoke(app, ["gpu", "bench", "--arm", "nope"])
+    assert result.exit_code == 1
+    assert "base_fewshot" in result.output
+
+
+def test_gpu_bench_refuses_the_teacher_arm_and_names_the_command_that_owns_it():
+    """The teacher is a network measurement, not a GPU one (F7 §Scope 6)."""
+    result = runner.invoke(app, ["gpu", "bench", "--arm", "teacher"])
+    assert result.exit_code == 1
+    assert "sxl bench teacher" in result.output
+
+
+def test_gpu_bench_requires_an_adapter_for_the_fine_tuned_arms():
+    """Otherwise it would benchmark the base model and attribute the result to the fine-tune."""
+    result = runner.invoke(app, ["gpu", "bench", "--arm", "lora_ft"])
+    assert result.exit_code == 1
+    assert "--adapter" in result.output
+
+
+def test_gpu_bench_rejects_a_malformed_batch_size_list_before_loading_a_model():
+    """A typo would silently shrink the sweep and move `best_batch_size`."""
+    result = runner.invoke(
+        app, ["gpu", "bench", "--arm", "base_fewshot", "--batch-sizes", "1,two,4"]
+    )
+    assert result.exit_code == 1
+    assert "--batch-sizes" in result.output
+
+
+def test_bench_teacher_is_implemented_and_exposes_its_options():
+    """F7 owns `bench teacher`; it runs on the laptop. Never invoked here — it spends money."""
+    result = runner.invoke(app, ["bench", "teacher", "--help"])
+    assert result.exit_code == 0
+    for option in ("--n", "--model", "--gold", "--out"):
+        assert option in result.output
 
 
 def test_gpu_predict_rejects_the_teacher_arm():

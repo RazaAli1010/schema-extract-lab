@@ -16,7 +16,17 @@ import textwrap
 
 import pytest
 
-MODULES = ["sxl.gpu", "sxl.gpu.runner", "sxl.gpu.constrained", "sxl.gpu.train_lora"]
+MODULES = [
+    "sxl.gpu",
+    "sxl.gpu.runner",
+    "sxl.gpu.constrained",
+    "sxl.gpu.train_lora",
+    "sxl.gpu.bench",
+    # Not under `sxl.gpu`, but it imports from it: the teacher benchmark is a
+    # network measurement that runs on the laptop (F7 §Scope 6), so it must stay
+    # as torch-free as the modules it borrows `BENCH_KEYS` from.
+    "sxl.bench_teacher",
+]
 
 
 def run_snippet(code: str) -> subprocess.CompletedProcess:
@@ -83,5 +93,35 @@ def test_gpu_train_help_works_without_torch():
         assert out.exit_code == 0, out.output
         assert "torch" not in sys.modules
         assert "trl" not in sys.modules
+    """)
+    assert result.returncode == 0, result.stderr
+
+
+def test_gpu_bench_help_works_without_torch():
+    result = run_snippet("""
+        import sys
+        from typer.testing import CliRunner
+        from sxl.cli import app
+
+        out = CliRunner().invoke(app, ["gpu", "bench", "--help"])
+        assert out.exit_code == 0, out.output
+        assert "torch" not in sys.modules
+    """)
+    assert result.returncode == 0, result.stderr
+
+
+def test_bench_teacher_runs_on_the_laptop_without_torch():
+    # Unlike every other F7 command this one is *meant* to execute here, so the
+    # bar is higher than `--help`: importing its implementation must stay clean.
+    result = run_snippet("""
+        import sys
+        import sxl.bench_teacher
+        from typer.testing import CliRunner
+        from sxl.cli import app
+
+        out = CliRunner().invoke(app, ["bench", "teacher", "--help"])
+        assert out.exit_code == 0, out.output
+        assert "torch" not in sys.modules
+        assert "openai" not in sys.modules
     """)
     assert result.returncode == 0, result.stderr
