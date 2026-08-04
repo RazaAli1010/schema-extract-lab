@@ -1,0 +1,40 @@
+{
+  "arm": "teacher",
+  "gpu_name": null,
+  "dtype": null,
+  "batch_size": 1,
+  "n_docs": 30,
+  "warmup": 0,
+  "repeats": 1,
+  "p50_ms": 2173.1,
+  "p95_ms": 3518.9,
+  "mean_ms": 2407.1,
+  "min_ms": 1600.4,
+  "max_ms": 5520.3,
+  "stdev_ms": 782.9,
+  "mean_completion_tokens": 101.2,
+  "p50_spread_pct": 0.0,
+  "throughput_docs_per_s": 0.4602,
+  "gpu_hourly_usd": null,
+  "cost_per_1k_docs_usd": 0.48034,
+  "cache_implementation": null,
+  "index_build_s": 0.0,
+  "measurement": "api_wall_clock",
+  "torch_version": null,
+  "transformers_version": null,
+  "generated_at": "2026-08-04T09:19:28Z",
+  "git_sha": "da31903",
+  "teacher_model": "gpt-4o-mini",
+  "mean_prompt_tokens": 2797.3,
+  "n_calls_ok": 30,
+  "n_calls_failed": 0,
+  "total_usd": 0.01441,
+  "pricing": {
+    "rates_usd_per_1m": {
+      "in": 0.15,
+      "out": 0.6
+    },
+    "batch_discount": false
+  },
+  "note": "Wall-clock latency of sequential, non-batch API calls made from the dev laptop: it includes network round-trip and provider queueing, and is not comparable with the GPU arms' local generate() timings. Cost is derived from measured token usage at STANDARD rates, not the 50% Batch API rates F2 used for labeling, because a latency-sensitive deployment cannot use a 24-hour batch queue."
+}
