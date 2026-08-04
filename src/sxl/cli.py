@@ -19,6 +19,12 @@ from sxl.config import (
     ADAPTER_DIR,
     ARMS,
     BASE_MODEL,
+    BENCH_BATCH_SIZES,
+    BENCH_DIR,
+    BENCH_N_DOCS,
+    BENCH_REPEATS,
+    BENCH_TEACHER_N,
+    BENCH_WARMUP,
     CHECKPOINT_DIR,
     CHECKPOINT_MIRROR_DIR,
     CORPUS_MIN_N,
@@ -31,11 +37,13 @@ from sxl.config import (
     EVAL_GOLD_PATH,
     FT_ARMS,
     GEN_BATCH_SIZE,
+    MAX_NEW_TOKENS,
     MAX_TEACHER_SPEND_USD,
     METRICS_DIR,
     N_EVAL_GOLD,
     N_GOLD_CANDIDATES,
     SEED,
+    T4_HOURLY_USD,
     TEACHER_MODEL,
     TEACHER_PRICE_USD,
     TRAIN_BATCH_SIZE,
@@ -78,6 +86,21 @@ _TRAIN_SUMMARY_KEYS = (
     "token_p95",
 )
 
+#: Echoed as one JSON line at the end of a bench run. Single-stream latency and
+#: the cost assumption it rests on -- deliberately *not* the amortized figures,
+#: which live in the sweep file under `best_*` names (SPEC §1.1).
+_BENCH_SUMMARY_KEYS = (
+    "arm",
+    "p50_ms",
+    "p95_ms",
+    "mean_completion_tokens",
+    "p50_spread_pct",
+    "throughput_docs_per_s",
+    "cost_per_1k_docs_usd",
+    "gpu_hourly_usd",
+    "measurement",
+)
+
 #: F2 acceptance criteria. Only checked on a full (`--limit 0`) run of that split.
 #: `eval_pool` is the tightest: F3 samples 330 candidates from it.
 _TEACHER_MIN_ROWS = {"train": 4500, "dev": 280, "eval_pool": 330}
@@ -94,6 +117,9 @@ teacher_app = typer.Typer(help="Teacher labeling pipeline (F2).", no_args_is_hel
 gold_app = typer.Typer(help="Eval-set sampling & human verification (F3).", no_args_is_help=True)
 metrics_app = typer.Typer(help="Metric scoring (F4).", no_args_is_help=True)
 gpu_app = typer.Typer(help="GPU work — Kaggle only (F5/F6/F7).", no_args_is_help=True)
+# Separate from `gpu` because the teacher benchmark is a *network* measurement that
+# runs on the laptop and must never pull torch (F7 §Scope 6).
+bench_app = typer.Typer(help="Non-GPU benchmarks (F7).", no_args_is_help=True)
 report_app = typer.Typer(help="Results aggregation & README (F8).", no_args_is_help=True)
 schema_app = typer.Typer(help="The JobPosting schema contract (F0).", no_args_is_help=True)
 
@@ -102,6 +128,7 @@ app.add_typer(teacher_app, name="teacher")
 app.add_typer(gold_app, name="gold")
 app.add_typer(metrics_app, name="metrics")
 app.add_typer(gpu_app, name="gpu")
+app.add_typer(bench_app, name="bench")
 app.add_typer(report_app, name="report")
 app.add_typer(schema_app, name="schema")
 
@@ -742,11 +769,224 @@ def gpu_train(
     typer.echo(json.dumps({k: stats[k] for k in _TRAIN_SUMMARY_KEYS}, sort_keys=True))
 
 
+def _parse_batch_sizes(raw: str) -> tuple[int, ...]:
+    """Parse `--batch-sizes "1,2,4"`. Loud on anything else.
+
+    A typo here would silently shrink the sweep and change `best_batch_size`, which
+    is the number the amortized cost figure is derived from -- so a bad token is a
+    hard error, not a skipped entry.
+    """
+    sizes: list[int] = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            value = int(token)
+        except ValueError as exc:
+            raise ValueError(f"--batch-sizes: {token!r} is not an integer") from exc
+        if value < 1:
+            raise ValueError(f"--batch-sizes: {value} is not a positive batch size")
+        sizes.append(value)
+    if not sizes:
+        raise ValueError("--batch-sizes is empty")
+    return tuple(sorted(set(sizes)))
+
+
 @gpu_app.command("bench")
-def gpu_bench(arm: ArmOpt = "") -> None:
-    """Measure latency, throughput and cost for an arm (Kaggle)."""
-    # F7 puts its `from sxl.gpu import bench` here, inside the body.
-    _not_yet("gpu bench", "F7")
+def gpu_bench(
+    arm: ArmOpt = "",
+    adapter: Annotated[
+        str, typer.Option("--adapter", help="HF repo id or local path; required for lora_ft arms")
+    ] = "",
+    model: Annotated[str, typer.Option("--model", help="base HF model id")] = BASE_MODEL,
+    gold: Annotated[
+        Path | None,
+        typer.Option("--gold", help=f"documents to benchmark [default: {EVAL_GOLD_PATH}]"),
+    ] = None,
+    train: Annotated[
+        Path | None,
+        typer.Option("--train", help=f"few-shot exemplar source [default: {TRAIN_PATH}]"),
+    ] = None,
+    n_docs: Annotated[
+        int, typer.Option("--n-docs", help="timed documents per pass")
+    ] = BENCH_N_DOCS,
+    warmup: Annotated[
+        int, typer.Option("--warmup", help="untimed iterations first")
+    ] = BENCH_WARMUP,
+    repeats: Annotated[
+        int, typer.Option("--repeats", help="full repeats of the single-stream pass")
+    ] = BENCH_REPEATS,
+    batch_sizes: Annotated[
+        str, typer.Option("--batch-sizes", help="comma-separated sweep, e.g. '1,2,4,8'")
+    ] = ",".join(str(b) for b in BENCH_BATCH_SIZES),
+    hourly_usd: Annotated[
+        float, typer.Option("--hourly-usd", help="GPU rental rate; an assumption, echoed in output")
+    ] = T4_HOURLY_USD,
+    out_dir: Annotated[
+        Path | None, typer.Option("--out-dir", help=f"bench output dir [default: {BENCH_DIR}]")
+    ] = None,
+) -> None:
+    """Measure latency, throughput and cost for an arm (Kaggle).
+
+    Writes `<out-dir>/<arm>.json` (single-stream p50/p95) and
+    `<out-dir>/<arm>_sweep.json` (amortized throughput per batch size). The two
+    are separate quantities and no file conflates them (SPEC §1.1).
+    """
+    if arm not in ARMS or arm == "teacher":
+        gpu_arms = [a for a in ARMS if a != "teacher"]
+        typer.secho(
+            f"--arm must be one of {gpu_arms}. The teacher arm is measured over the network "
+            "by `sxl bench teacher`, not on a GPU.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    try:
+        sizes = _parse_batch_sizes(batch_sizes)
+    except ValueError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    gold_path = gold if gold is not None else EVAL_GOLD_PATH
+    train_path = train if train is not None else TRAIN_PATH
+    bench_dir = out_dir if out_dir is not None else BENCH_DIR
+
+    is_ft = arm in FT_ARMS
+    if is_ft and not adapter:
+        typer.secho(
+            f"--arm {arm} needs --adapter. Without one this would benchmark the BASE model "
+            "under the fine-tuned prompt, and the resulting latency would be attributed to "
+            "the fine-tune in F8's table.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # Checked before the torch import below: a typo'd Kaggle path should cost a
+    # second, not a model load.
+    needed = [("--gold", gold_path)] + ([] if is_ft else [("--train", train_path)])
+    for label, path in needed:
+        if not path.exists():
+            typer.secho(
+                f"{label} {path} does not exist. On Kaggle, pass the mounted dataset paths "
+                "explicitly (e.g. /kaggle/input/sxl-data/eval_gold.jsonl).",
+                fg=typer.colors.RED,
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
+    # `sxl.gpu.runner` is torch-free at module level (tests/test_gpu_lazy_import.py),
+    # so importing `fewshot_prompt_fn` here costs nothing on the laptop.
+    from sxl.gpu.runner import fewshot_prompt_fn
+    from sxl.io import read_jsonl, write_json
+    from sxl.prompts import FT_PROMPT_SHA, STUDENT_PROMPT_SHA, build_ft_prompt, pick_fewshot
+
+    gold_rows = list(read_jsonl(gold_path))
+    if len(gold_rows) < n_docs:
+        typer.secho(
+            f"--n-docs {n_docs} but {gold_path} has only {len(gold_rows)} rows.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # The prompt builder is selected exactly as `gpu predict` selects it, so the
+    # benchmark times the same prompt that produced this arm's predictions.
+    # Benchmarking a different prompt would make the latency and accuracy tables
+    # describe different runs (F7 §Reuse from F5).
+    if is_ft:
+        prompt_fn, prompt_sha = build_ft_prompt, FT_PROMPT_SHA
+    else:
+        try:
+            shots = pick_fewshot(read_jsonl(train_path))
+        except ValueError as exc:
+            typer.secho(str(exc), fg=typer.colors.RED, err=True)
+            raise typer.Exit(code=1) from exc
+        prompt_fn, prompt_sha = fewshot_prompt_fn(shots), STUDENT_PROMPT_SHA
+
+    prompts = [prompt_fn(row["text"]) for row in gold_rows]
+    typer.echo(
+        f"[bench] arm={arm} model={model} adapter={adapter or '-'} prompt_sha={prompt_sha} "
+        f"n_docs={n_docs} warmup={warmup} repeats={repeats} batch_sizes={list(sizes)}"
+    )
+
+    from sxl.gpu.bench import BenchError
+    from sxl.gpu.bench import run as run_bench
+
+    try:
+        record, sweep = run_bench(
+            arm,
+            prompts,
+            model_id=model,
+            adapter=adapter or None,
+            constrained=arm.endswith("_constrained"),
+            n_docs=n_docs,
+            warmup=warmup,
+            repeats=repeats,
+            batch_sizes=sizes,
+            max_new_tokens=MAX_NEW_TOKENS,
+            hourly_usd=hourly_usd,
+            echo=typer.echo,
+        )
+    except BenchError as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    bench_path = Path(bench_dir) / f"{arm}.json"
+    sweep_path = Path(bench_dir) / f"{arm}_sweep.json"
+    write_json(bench_path, record, sort_keys=False)
+    write_json(sweep_path, sweep, sort_keys=False)
+
+    typer.echo(f"wrote {bench_path}")
+    typer.echo(f"wrote {sweep_path}")
+    typer.echo(json.dumps({k: record[k] for k in _BENCH_SUMMARY_KEYS}, sort_keys=True))
+
+
+# --- F7 (laptop) --------------------------------------------------------------
+@bench_app.command("teacher")
+def bench_teacher(
+    n: Annotated[int, typer.Option("--n", help="sequential API calls to time")] = BENCH_TEACHER_N,
+    model: Annotated[str, typer.Option("--model", help="teacher model id")] = TEACHER_MODEL,
+    gold: Annotated[
+        Path | None, typer.Option("--gold", help=f"documents to send [default: {EVAL_GOLD_PATH}]")
+    ] = None,
+    out: Annotated[
+        Path | None, typer.Option("--out", help=f"output file [default: {BENCH_DIR}/teacher.json]")
+    ] = None,
+) -> None:
+    """Time the teacher API over the network and price it at standard rates (laptop).
+
+    Non-batch, sequential calls: a latency-sensitive deployment cannot use the
+    24-hour Batch API that F2 labeled the corpus with, so this is priced at full
+    rate and carries `measurement: "api_wall_clock"` to keep it from being read as
+    comparable with the GPU arms (F7 §Scope 6).
+    """
+    gold_path = gold if gold is not None else EVAL_GOLD_PATH
+    out_path = out if out is not None else BENCH_DIR / "teacher.json"
+
+    if not gold_path.exists():
+        typer.secho(f"--gold {gold_path} does not exist", fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1)
+
+    from sxl.bench_teacher import run as run_teacher_bench
+    from sxl.gpu.bench import BenchError
+    from sxl.io import read_jsonl, write_json
+    from sxl.teacher import MissingApiKey
+
+    docs = list(read_jsonl(gold_path))
+    typer.echo(f"[bench-teacher] {n} sequential calls to {model} from {gold_path}")
+
+    try:
+        record = run_teacher_bench(docs, n=n, model=model, echo=typer.echo)
+    except (BenchError, MissingApiKey) as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    write_json(out_path, record, sort_keys=False)
+    typer.echo(f"wrote {out_path}")
+    typer.echo(json.dumps({k: record[k] for k in _BENCH_SUMMARY_KEYS}, sort_keys=True))
 
 
 # --- F8 ----------------------------------------------------------------------
